@@ -1,0 +1,2 @@
+.hero{padding:42rpx 34rpx 30rpx}.hero .title{font-size:43rpx}.welcome-card{margin:42rpx 30rpx;padding:54rpx 34rpx;background:white;border-radius:24rpx;text-align:center}.welcome-card .subtitle{margin:18rpx 0 38rpx}.welcome-glyph{margin:0 auto 30rpx;width:100rpx;height:100rpx;background:#e4f6ec;color:#078647;border-radius:30rpx;font-size:44rpx;line-height:100rpx}
+.hero .row>view{flex:1;min-width:0}.round-add{flex:0 0 68rpx;min-width:68rpx;max-width:68rpx}

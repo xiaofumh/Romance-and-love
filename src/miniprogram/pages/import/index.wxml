@@ -1,0 +1,54 @@
+<view class="page">
+  <view class="title">{{step === 0 ? '整理一段历史' : step === 1 ? '清洗与脱敏预览' : '最后一次确认'}}</view>
+  <view class="hint">① 文本与说话人　② 清洗预览　③ 授权导入</view>
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+  <view wx:if="{{step === 0}}">
+    <view class="card">
+      <text class="field-label">资料名称</text>
+      <input class="input" maxlength="40" value="{{title}}" data-field="title" bindinput="input" placeholder="不要使用真实姓名或隐私信息"/>
+      <text class="field-label">哪一方是你？</text>
+      <view class="row"><input class="input" maxlength="20" value="{{userSpeaker}}" data-field="userSpeaker" bindinput="input" placeholder="你的称呼"/><input class="input" maxlength="20" value="{{referenceSpeaker}}" data-field="referenceSpeaker" bindinput="input" placeholder="参考对象的称呼"/></view>
+      <view class="hint">左边代表你，右边代表参考对象。请填写文件中实际使用的称呼，只参考右边的表达风格。</view>
+      <text class="field-label">聊天文本</text>
+      <textarea class="input import-text" maxlength="-1" wx:if="{{!largeTextLoaded}}" value="{{text}}" data-field="text" bindinput="input" placeholder="我：今天有点累。&#10;对方：那就先休息一会儿。"/>
+      <view class="hint">已载入 {{textCharacters}} 字 · 不另设字数限制 · TXT最多1MB（1024KB）</view>
+      <view class="hint">支持“称呼：内容”、【称呼】内容、带时间的消息和桌面版喂养数据。自动识别已知标题、编号与统计说明；未知内容保留为待处理，不猜测说话人。</view>
+      <view class="hint" wx:if="{{largeTextLoaded}}">长文本已完整载入，将分段预览，不会截断。<button class="text-button" bindtap="clearText">清除后重新编辑</button></view>
+      <view class="actions"><button class="secondary" bindtap="chooseFile">手动选TXT</button><button class="secondary" bindtap="example">填入虚构示例</button></view>
+      <button class="secondary screenshot-entry" bindtap="screenshot">截图识别（选图后核对）</button>
+    </view>
+    <button class="primary" bindtap="preview">解析、清洗并预览</button>
+  </view>
+  <view wx:if="{{step === 1}}">
+    <view class="card">
+      <view class="section-title">{{format}}</view>
+      <view>{{turnCount}} 条消息 · {{pendingCount}} 段待处理</view>
+      <view class="hint">排除 {{metadataCount}} 行已知说明/时间标记、{{blankLines}} 行空行；合并 {{normalizedBreaks}} 处正文换行。手动排除 {{excludedCount}} 段。原文件未修改，解析不调用模型。</view>
+      <view class="hint" wx:if="{{englishCount || duplicateCount}}">发现 {{englishCount}} 条疑似纯英文消息、{{duplicateCount}} 条与前文完全重复的消息，均保留，未自动翻译或去重。</view>
+      <view class="demo-note" wx:if="{{corpus}}">这是独立问答数据集，不等于个人微信聊天记录，不能据此推断你或某个人的经历。部分样本可能不连贯，建议检查质量后再导入。</view>
+      <view wx:if="{{pendingCount}}">
+        <view class="hint">当前匹配：你 = {{userSpeaker}}；参考对象 = {{referenceSpeaker}}。点击文件中的称呼重新匹配（会重置逐段处理）。</view>
+        <view class="mapping-row" wx:for="{{candidates}}" wx:key="*this"><text class="grow">{{item}}</text><button class="text-button" data-name="{{item}}" data-side="userSpeaker" bindtap="setSpeaker">设为我</button><button class="text-button" data-name="{{item}}" data-side="referenceSpeaker" bindtap="setSpeaker">设为参考对象</button></view>
+        <view class="hint" wx:if="{{candidateCount > 20}}">共{{candidateCount}}种称呼，仅展示前20种；其他称呼请返回填写。</view>
+      </view>
+    </view>
+    <view class="demo-note">辅助隐藏手机号、邮箱、证件号及长号码。不保证识别所有隐私，请检查姓名、地址等。导入内容与消息预览一致；排除内容可在下方单独核对。</view>
+    <view class="chips"><button class="chip {{reviewKind === 'messages' ? 'selected' : ''}}" data-kind="messages" bindtap="selectKind">消息</button><button class="chip {{reviewKind === 'issues' ? 'selected' : ''}}" data-kind="issues" bindtap="selectKind">待处理 {{pendingCount}}</button><button class="chip {{reviewKind === 'removed' ? 'selected' : ''}}" data-kind="removed" bindtap="selectKind">排除记录</button></view>
+    <view class="empty" wx:if="{{!previewRows.length}}">{{reviewKind === 'issues' ? '没有待处理内容' : reviewKind === 'removed' ? '没有排除内容' : '暂无已匹配消息，请先处理称呼或未知内容'}}</view>
+    <view class="card" wx:for="{{previewRows}}" wx:key="key">
+      <text class="pill" wx:if="{{reviewKind === 'messages'}}">消息{{item.turn}} · 分段{{item.part}} · {{item.speaker === 'user' ? '你' : '参考对象'}}</text>
+      <view wx:else><text class="pill">原文{{item.line}}—{{item.endLine}}行 · 分段{{item.part}}</text><view class="hint">{{item.reason}}</view><view class="hint" wx:if="{{item.sourceSpeaker}}">原文称呼：{{item.sourceSpeaker}}</view></view>
+      <text class="source-text" user-select>{{item.text}}</text>
+      <view wx:if="{{reviewKind === 'issues'}}"><view class="hint">以下操作处理这一整段原文（可能跨多个预览分段），请先看完全文；也可返回编辑。不会自动忽略。</view><view class="actions"><button class="secondary" data-index="{{item.index}}" data-action="user" bindtap="resolve">归为我</button><button class="secondary" data-index="{{item.index}}" data-action="reference" bindtap="resolve">归为参考对象</button></view><button class="text-button danger" data-index="{{item.index}}" data-action="exclude" bindtap="resolve">排除此段（不导入）</button></view>
+    </view>
+    <view class="row"><button class="text-button" bindtap="previous" disabled="{{previewPage <= 1}}">上一页</button><text>{{previewPage}} / {{previewPages}}</text><button class="text-button" bindtap="next" disabled="{{previewPage >= previewPages}}">下一页</button></view>
+    <view class="row"><input class="input" type="number" maxlength="10" value="{{pageInput}}" bindinput="pageInput"/><button class="text-button" bindtap="jump">跳转</button></view>
+    <button class="text-button" bindtap="resetCleaning">撤销逐段处理，重新解析</button>
+    <view class="actions"><button class="secondary" bindtap="back">返回编辑</button><button class="primary" bindtap="confirmStep" disabled="{{pendingCount > 0 || turnCount < 2}}">已核对，下一步</button></view>
+  </view>
+  <view wx:if="{{step === 2}}">
+    <view class="card"><view class="section-title">{{title}}</view><view>{{turnCount}} 条脱敏消息 · 仅绑定当前角色 · 保存30天</view><view class="paragraph">导入不修改模型参数。发送聊天时，系统会按相关度选择最多3个片段交给模型参考。资料中的经历不自动认作你的事实，也不会冒充参考对象。</view><view class="paragraph">有权使用不仅是“我持有这些聊天”。请确认涉及第三人内容已取得必要授权，删除不必要信息。数据集还需确认来源及使用许可。</view></view>
+    <view class="consent-row" bindtap="authorize"><text class="check">{{authorized ? '☑' : '○'}}</text>我已核对脱敏内容，并有权将其用于AI参考</view>
+    <view class="actions"><button class="secondary" bindtap="back" disabled="{{busy}}">返回修改</button><button class="primary" bindtap="save" loading="{{busy}}" disabled="{{busy || !authorized}}">确认导入</button></view>
+  </view>
+</view>

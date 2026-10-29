@@ -1,0 +1,5 @@
+<view class="page"><view class="row"><view><text class="eyebrow">DIFFERENT WAYS TO CONNECT</text><view class="title">相伴的人格</view></view><button class="round-add" bindtap="create">＋</button></view><view class="subtitle">关系与性格分开选择。所有伙伴都是AI角色。</view>
+  <view class="error" wx:if="{{error}}">{{error}}<button class="text-button" bindtap="load">重试</button></view>
+  <view class="card" wx:for="{{items}}" wx:key="id"><view class="row"><view class="avatar">{{item.name}}</view><view class="grow"><view class="section-title">{{item.name}}</view><text class="hint">AI{{item.relationship === 'friend' ? '朋友' : '伴侣角色'}} · {{item.personality}}</text></view></view><view class="role-desc">{{item.description || '愿意听你说，也会坦诚表达不同看法。'}}</view><view class="actions"><button class="secondary" data-id="{{item.id}}" bindtap="edit">角色详情</button><button class="primary" data-id="{{item.id}}" bindtap="chat" disabled="{{busy}}">新建聊天</button></view></view>
+  <view class="empty" wx:if="{{!items.length && !error}}">还没有角色。<button class="text-button" bindtap="create">创建第一个AI伙伴 ›</button></view><view class="footer-note">同一人格模板的不同角色，也不会共用私人记忆</view>
+</view>

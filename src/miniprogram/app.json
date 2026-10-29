@@ -1,0 +1,28 @@
+{
+  "pages": [
+    "pages/chats/index", "pages/roles/index", "pages/data/index",
+    "pages/chat/index", "pages/role-edit/index", "pages/chat-settings/index",
+    "pages/import/index", "pages/screenshot/index", "pages/role-memory/index", "pages/source/index",
+    "pages/compose/index", "pages/history/index", "pages/settings/index",
+    "pages/profile/index", "pages/memory/index", "pages/legal/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "相伴 · AI聊天",
+    "navigationBarBackgroundColor": "#ededed",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#ededed",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#888888", "selectedColor": "#07a65a", "backgroundColor": "#fafafa", "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/chats/index", "text": "聊天" },
+      { "pagePath": "pages/roles/index", "text": "角色" },
+      { "pagePath": "pages/data/index", "text": "资料" },
+      { "pagePath": "pages/settings/index", "text": "我的" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

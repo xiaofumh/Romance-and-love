@@ -1,0 +1,25 @@
+<view class="page">
+  <view class="title">从聊天截图提取</view><view class="hint">选图 → 确认上传 → 识别核对 → 加入文字预览</view>
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+  <view class="hint" wx:if="{{quotaKnown}}">今日识别尝试剩余 {{dailyRemaining}} / {{dailyLimit}} 个分片（失败也计次）</view>
+  <view class="card"><view class="section-title">先裁掉不需要的信息</view><view class="paragraph">请只选有权用于AI参考的截图。建议先用相册裁掉联系人姓名、头像和无关内容。不会访问其他微信聊天，也不会自动导入。</view>
+    <button class="secondary" bindtap="chooseImage" disabled="{{busy || preparing}}" loading="{{preparing}}">{{imagePath ? '重新选择截图（清除本次结果）' : '从相册选择一张截图'}}</button>
+    <image wx:if="{{imagePath}}" class="screenshot" src="{{imagePath}}" mode="aspectFit" bindtap="previewImage"/>
+    <view class="hint" wx:if="{{imagePath}}">已在本机分为{{tileCount}}片，每片单独调用。长图边界保留重叠区，可能重复或缺半句，请核对；不自动去重。离开本页会清除未加入的识别结果，相册原图不会删除。</view>
+  </view>
+  <view class="card" wx:if="{{imagePath}}"><view class="section-title">截图将发到哪里？</view><view class="paragraph">确认后，截图分片经微信云函数发给智谱 BigModel 的 GLM-4.6V-FlashX（按量计费）。图片可能仍有第三人信息，无法在识别前保证脱敏。识别结果仅返回本页，不在本应用云存储保存原图或识别正文；不能承诺服务商零保留。</view><view class="hint">按模型实际用量计费，另有云资源成本，也可能限流；每账号每天最多10个分片（含失败），与聊天共享全局模型调用预算，不占聊天轮数。次数上限不是人民币金额上限。截图不会改变GLM-4.7聊天模型。</view>
+    <view class="consent-row" bindtap="authorizeUpload"><text class="check">{{uploadAuthorized ? '☑' : '○'}}</text>我有权使用图片，并同意将截图分片交给上述服务识别</view>
+    <button class="primary" bindtap="recognize" disabled="{{busy || preparing || !uploadAuthorized || attempted}}" loading="{{busy}}">{{busy ? '识别中，请勿重复点击' : '开始真实识别'}}</button>
+    <view class="hint">已成功{{completed}} / {{tileCount}}片。失败不自动重试，已成功结果保留。</view><button class="text-button" wx:if="{{!busy && completed < tileCount && error}}" bindtap="retry">主动重试失败分片（可能再次计次）</button>
+  </view>
+  <view wx:if="{{messageCount}}">
+    <view class="card"><view class="section-title">哪一侧是你？</view><view class="actions"><button class="chip {{userSide === 'left' ? 'selected' : ''}}" data-side="left" bindtap="userSide" disabled="{{busy}}">左侧是我</button><button class="chip {{userSide === 'right' ? 'selected' : ''}}" data-side="right" bindtap="userSide" disabled="{{busy}}">右侧是我</button></view><view class="hint">左右识别是模型判断，并非可靠身份确认。共{{messageCount}}条候选，请核对每页；图片/语音占位需排除或补充真实文字。</view></view>
+    <view class="card {{item.excluded ? 'excluded' : ''}}" wx:for="{{rows}}" wx:key="index"><view class="hint">候选{{item.index + 1}} · 分片{{item.tile}} · {{item.side === 'left' ? '左侧' : item.side === 'right' ? '右侧' : '归属待确认'}}{{item.uncertain ? ' · 内容可能不完整' : ''}}{{item.kind === 'nontext' ? ' · 非文字占位' : ''}}</view>
+      <textarea class="input" maxlength="-1" value="{{item.text}}" data-index="{{item.index}}" bindinput="edit" disabled="{{busy}}"/>
+      <view class="actions"><button class="secondary" data-index="{{item.index}}" data-side="left" bindtap="side" disabled="{{busy}}">改为左侧</button><button class="secondary" data-index="{{item.index}}" data-side="right" bindtap="side" disabled="{{busy}}">改为右侧</button><button class="text-button danger" data-index="{{item.index}}" bindtap="exclude" disabled="{{busy}}">{{item.excluded ? '恢复' : '排除'}}</button></view>
+    </view>
+    <view class="row"><button class="text-button" bindtap="previous" disabled="{{page <= 1}}">上一页</button><text>{{page}} / {{pages}}</text><button class="text-button" bindtap="next" disabled="{{page >= pages}}">下一页</button></view>
+    <view class="consent-row" bindtap="review"><text class="check">{{reviewed ? '☑' : '○'}}</text>我已逐页核对文字、左右归属、分片重复与缺句</view><button class="primary" bindtap="append" disabled="{{busy || returning || !recognized || !reviewed}}">加入导入页（尚不保存资料）</button>
+  </view>
+  <canvas id="ocr-canvas" type="2d" class="ocr-canvas"/>
+</view>

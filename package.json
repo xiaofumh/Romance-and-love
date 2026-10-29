@@ -1,0 +1,26 @@
+{
+  "name": "ai-communication-assistant",
+  "version": "0.5.0",
+  "private": true,
+  "description": "相伴AI聊天V0.5.0：默认12轮、自然话题延伸与可等待的主动接话",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "miniprogram-api-typings": "latest",
+    "miniprogram-automator": "^0.13.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

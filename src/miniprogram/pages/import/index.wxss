@@ -1,0 +1,3 @@
+.import-text{height:420rpx!important}.primary{margin-top:24rpx}.actions .primary{margin-top:0}.paragraph{font-size:25rpx;color:#777;margin-top:22rpx}.card{word-break:break-word}
+.mapping-row{display:flex;align-items:center;gap:12rpx;border-bottom:1rpx solid #eef1eb;padding:8rpx 0}.mapping-row .grow{overflow-wrap:anywhere}.chips{position:relative;flex-wrap:nowrap}.chips .chip{flex:1;min-width:0;margin:0;padding:12rpx 8rpx;white-space:nowrap;font-size:23rpx}.source-text{display:block;margin-top:12rpx}
+.screenshot-entry{width:100%;margin-top:18rpx}

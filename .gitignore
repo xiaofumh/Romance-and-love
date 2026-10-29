@@ -1,0 +1,29 @@
+# Dependencies and generated packages
+node_modules/
+dist/
+coverage/
+.pnpm-store/
+.vite/
+
+# Credentials and machine-specific settings
+.env
+.env.*
+!.env.example
+project.private.config.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+
+# Local evidence, user data, previews and release backups
+.local/
+.work/
+output/
+deliverables/
+release-snapshots/
+wechat-preview*.png
+preview-info*.json
+upload-info*.json
+Thumbs.db
+.DS_Store

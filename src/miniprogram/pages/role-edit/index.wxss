@@ -1,0 +1,1 @@
+.steps{color:#829084;font-size:25rpx;margin:24rpx 0}.choice{padding:28rpx 22rpx;border:2rpx solid #eee;border-radius:18rpx;margin-top:24rpx}.choice.selected{border-color:#07a65b;background:#effaf3}.card textarea{height:160rpx}.consent-row{margin:24rpx 0;font-size:24rpx}

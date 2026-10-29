@@ -1,0 +1,17 @@
+.examples { margin:26rpx 0 8rpx; gap:12rpx; }
+.sample { color:#8b927c; background:#f0efe6; padding:11rpx 17rpx; border-radius:12rpx; font-size:22rpx; }
+.compose-card { margin-top:20rpx; }
+.message-input { width:100%; height:185rpx; font-size:29rpx; line-height:1.85; color:#314639; margin:20rpx 0 8rpx; }
+.placeholder { color:#b5bcae; }
+.compact { height:130rpx !important; }
+.length-row { margin-top:12rpx; }
+.length-row .chips { margin-top:12rpx; }
+.history-info { font-size:22rpx; color:#8d9886; margin-top:22rpx; }
+.consent { display:flex; gap:15rpx; align-items:flex-start; color:#8b9486; font-size:22rpx; margin:28rpx 4rpx; }
+.consent-check { flex-shrink:0; border:2rpx solid #bdcbb5; width:33rpx; height:33rpx; border-radius:9rpx; line-height:29rpx; text-align:center; color:#fff; margin-top:3rpx; }
+.consent-check.checked { background:#50774e; border-color:#50774e; }
+.quota { text-align:center; color:#8f9a88; font-size:22rpx; margin-top:17rpx; }
+.results { margin-top:48rpx; }
+.reply-number { letter-spacing:2rpx; font-size:22rpx; color:#a3ab91; }
+.reply-text { display:block; font-size:30rpx; line-height:1.95; margin:22rpx 0 18rpx; color:#344b3c; white-space:pre-wrap; }
+.reply-card { border-left:5rpx solid #c3d5b5; }

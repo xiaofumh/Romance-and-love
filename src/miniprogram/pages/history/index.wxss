@@ -1,0 +1,2 @@
+.history-message { margin:10rpx 0 24rpx; font-size:29rpx; white-space:pre-wrap; }
+.saved-reply { padding:14rpx 0; font-size:27rpx; color:#4b6251; }

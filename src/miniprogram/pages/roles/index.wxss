@@ -1,0 +1,2 @@
+.role-desc{margin:24rpx 0;color:#777;font-size:26rpx}.avatar{font-size:25rpx;overflow:hidden}.actions .primary{padding:16rpx}
+.row>view:first-child:not(.avatar){flex:1;min-width:0}.round-add{flex:0 0 68rpx;min-width:68rpx;max-width:68rpx}

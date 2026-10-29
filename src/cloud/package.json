@@ -1,0 +1,11 @@
+{
+  "name": "assistant-api",
+  "version": "0.1.0",
+  "main": "index.js",
+  "private": true,
+  "dependencies": {
+    "wx-server-sdk": "^3.0.0",
+    "tencentcloud-sdk-nodejs-tms": "^4.0.0"
+  },
+  "engines": { "node": ">=20" }
+}

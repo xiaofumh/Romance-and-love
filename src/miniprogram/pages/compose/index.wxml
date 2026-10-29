@@ -1,0 +1,42 @@
+<view class="page">
+  <view class="row"><text class="eyebrow">WORDS, WITH CARE</text><text class="badge">{{bootstrap.mode === 'cloud' ? '真实模型' : '本地模拟版'}}</text></view>
+  <view class="title">把想说的话，<view>说得刚刚好。</view></view>
+  <view class="subtitle">多一点理解，少一点误会。<view>为你的下一句话，找一个合适的表达。</view></view>
+  <view class="demo-note" wx:if="{{bootstrap.mode !== 'cloud'}}">离线模板演示 · 不调用模型、不上传聊天内容</view>
+  <view class="demo-note" wx:if="{{initializing}}">正在初始化体验…</view>
+  <view class="error" wx:if="{{!initializing && !bootstrap}}">{{error || '初始化未完成'}}<button class="text-button" bindtap="refresh">重新加载</button></view>
+  <view class="chips examples"><view class="sample" data-key="late" bindtap="example">解释回复慢 ↗</view><view class="sample" data-key="refuse" bindtap="example">温和拒绝 ↗</view><view class="sample" data-key="work" bindtap="example">职场确认 ↗</view></view>
+  <view class="card compose-card">
+    <view class="row"><text class="section-title">对方说了什么？</text><text class="hint">{{message.length}} / 2000</text></view>
+    <textarea class="message-input" placeholder="粘贴对方的消息，或写下你想回应的内容…" placeholder-class="placeholder" value="{{message}}" maxlength="2000" data-field="message" bindinput="onField" disabled="{{busy}}" adjust-position="{{true}}" />
+    <view class="row"><text class="hint">请移除不必要的姓名、号码和地址</text><button class="text-button" bindtap="clear" disabled="{{busy}}">清空</button></view>
+    <view class="divider"></view>
+    <view class="row" bindtap="toggleBackground"><text class="section-title">补充一点背景</text><text class="small-link">{{showBackground ? '收起 −' : '可选 ＋'}}</text></view>
+    <view wx:if="{{showBackground}}">
+      <text class="field-label">已经确定的事实</text><textarea class="input compact" placeholder="例如：刚才在开会，今晚是否有空还不确定" value="{{background}}" maxlength="1000" data-field="background" bindinput="onField" disabled="{{busy}}" />
+      <text class="field-label">你希望怎么沟通</text><input class="input" placeholder="例如：解释情况，不承诺具体时间" value="{{goal}}" maxlength="1000" data-field="goal" bindinput="onField" disabled="{{busy}}" />
+    </view>
+    <text class="field-label">沟通场景</text><view class="chips"><view wx:for="{{scenes}}" wx:key="value" class="chip {{scene === item.value ? 'selected' : ''}}" data-field="scene" data-value="{{item.value}}" bindtap="select">{{item.label}}</view></view>
+    <text class="field-label">想要的语气</text><view class="chips"><view wx:for="{{tones}}" wx:key="value" class="chip {{tone === item.value ? 'selected' : ''}}" data-field="tone" data-value="{{item.value}}" bindtap="select">{{item.label}}</view></view>
+    <view class="row length-row"><text class="field-label">回复长度</text><view class="chips"><view class="chip {{length === 'short' ? 'selected' : ''}}" data-field="length" data-value="short" bindtap="select">短一点</view><view class="chip {{length === 'medium' ? 'selected' : ''}}" data-field="length" data-value="medium" bindtap="select">完整些</view></view></view>
+    <view class="divider"></view>
+    <view class="row"><text class="hint">表达档案</text><picker range="{{profileNames}}" value="{{profileIndex}}" bindchange="onProfile"><text class="small-link">{{profileNames[profileIndex]}} ﹀</text></picker><button class="text-button" bindtap="openProfiles">管理</button></view>
+    <view class="history-info" bindtap="openSettings">{{bootstrap.settings.historyEnabled ? '已开启历史保存：最近20条，最长30天' : '历史默认不保存，可在「我的」主动开启'}} ›</view>
+  </view>
+  <view class="consent"><view class="consent-check {{accepted ? 'checked' : ''}}" bindtap="toggleConsent">{{accepted ? '✓' : ''}}</view><view>我已阅读并同意<text class="small-link" bindtap="openLegal">《使用与隐私说明》</text>，确认有权使用所提交的内容。</view></view>
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+  <button class="primary" bindtap="generate" loading="{{busy}}" disabled="{{busy || initializing || !bootstrap}}">{{busy ? '正在整理表达…' : (hasPending ? '查询 / 恢复原请求' : '生成 3 条回复建议')}} <text wx:if="{{!busy}}">✦</text></button>
+  <view class="quota">今日剩余 {{bootstrap.remainingQuota === undefined ? '—' : bootstrap.remainingQuota}} 次体验 · 由你决定是否使用</view>
+  <view class="results" wx:if="{{result.status === 'SUCCEEDED'}}">
+    <view class="row result-heading"><text class="section-title">换一种表达，也许更合适</text><text class="badge">AI生成</text></view>
+    <view class="demo-note" wx:for="{{result.warnings}}" wx:key="*this">{{item}}</view>
+    <view class="card reply-card" wx:for="{{result.replies}}" wx:key="id">
+      <view class="row"><text class="reply-number">0{{index + 1}} / 表达建议</text><text class="hint">AI生成</text></view>
+      <text class="reply-text" selectable="{{true}}">{{item.text}}</text>
+      <view class="row"><button class="text-button" data-index="{{index}}" bindtap="edit">编辑一下</button><button class="secondary" data-index="{{index}}" bindtap="copy">{{copiedId === item.id ? '已复制 ✓' : '复制这条'}}</button></view>
+    </view>
+    <view class="row"><text class="hint">{{generatedAt}} · 使用前请核对事实</text><button class="text-button" bindtap="feedback">反馈问题</button></view>
+  </view>
+  <view class="footer-note">好的沟通，始于真实的表达</view>
+  <view class="overlay" wx:if="{{editing}}" catchtap="closeEdit"><view class="dialog" catchtap="noop"><view class="section-title">调整成你的表达</view><textarea class="input" value="{{editText}}" maxlength="500" bindinput="onEdit" /><text class="hint">复制时保留 AI 生成标识；编辑内容仅修改当前展示。</text><view class="actions"><button class="secondary" bindtap="closeEdit">取消</button><button class="primary" bindtap="saveEdit">保存修改</button></view></view></view>
+</view>

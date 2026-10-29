@@ -1,0 +1,14 @@
+<view class="page">
+  <text class="eyebrow">YOUR WORDS, KEPT BY YOU</text><view class="title">表达的足迹</view><view class="subtitle">只留下你愿意保存的内容。</view>
+  <view class="demo-note" wx:if="{{mode === 'demo'}}">本地模拟数据 · 仅保存在当前开发工具 / 设备</view>
+  <view class="card row" bindtap="openSettings"><view><view class="section-title">{{enabled ? '历史保存已开启' : '历史保存已关闭'}}</view><view class="hint">最近20条 · 最长30天 · 可随时删除</view></view><text class="small-link">设置 ›</text></view>
+  <view class="error" wx:if="{{error}}">{{error}}</view>
+  <view class="empty card" wx:if="{{!items.length && !loading}}"><view class="empty-mark">◌</view><view class="section-title">这里还没有记录</view><view class="hint">开启历史保存后，新生成的建议会出现在这里。</view><button class="secondary" style="margin-top:28rpx" bindtap="compose">去写一条回复</button></view>
+  <view class="card" wx:for="{{items}}" wx:key="id" wx:for-item="record">
+    <view class="row"><text class="hint">{{record.timeLabel}}</text><button class="text-button danger" data-id="{{record.id}}" bindtap="remove">删除</button></view>
+    <view class="history-message" data-id="{{record.id}}" bindtap="toggle">{{record.message}}</view>
+    <view class="row"><view><text class="pill">{{record.sceneLabel}}</text><text class="pill">{{record.toneLabel}}</text></view><text class="small-link" data-id="{{record.id}}" bindtap="toggle">{{expanded === record.id ? '收起 −' : '查看建议 ＋'}}</text></view>
+    <view wx:if="{{expanded === record.id}}"><view class="divider"></view><view class="saved-reply" wx:for="{{record.replies}}" wx:key="id"><view class="row"><text class="hint">0{{index + 1}} · AI生成</text><button class="text-button" data-id="{{record.id}}" data-index="{{index}}" bindtap="copy">复制</button></view><text selectable="{{true}}">{{item.text}}</text></view></view>
+  </view>
+  <button wx:if="{{cursor}}" class="text-button" bindtap="more" loading="{{loading}}">加载更多</button><view wx:if="{{loading}}" class="empty">正在读取…</view>
+</view>

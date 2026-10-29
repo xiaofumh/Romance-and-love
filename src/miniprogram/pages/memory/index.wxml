@@ -1,0 +1,6 @@
+<view class="page"><text class="eyebrow">ONLY WHAT YOU CONFIRM</text><view class="title">已确认的记忆</view><view class="subtitle">不把猜测当事实。只保存你明确确认、允许使用的信息。</view>
+  <view class="demo-note" wx:if="{{!enabled}}" bindtap="settings">记忆当前关闭，前往「我的」主动开启 ›</view>
+  <view class="card"><view class="section-title">{{editingId ? '修改事实' : '添加一条事实'}}</view><textarea class="input" style="margin-top:24rpx" placeholder="例如：我不喝咖啡。避免记录不必要的第三人隐私。" value="{{text}}" maxlength="100" bindinput="input" /><view class="memory-consent" bindtap="confirm"><text>{{confirmed ? '☑' : '□'}}</text> 我确认内容真实、有权使用，并同意用于当前档案的生成。</view><view class="actions"><button wx:if="{{editingId}}" class="secondary" bindtap="cancel">取消</button><button class="primary" disabled="{{!enabled || saving}}" loading="{{saving}}" bindtap="save">确认并保存</button></view></view>
+  <view class="card" wx:for="{{items}}" wx:key="id"><text selectable="{{true}}">{{item.text}}</text><view class="hint">确认于 {{item.timeLabel}}</view><view class="row"><button class="text-button" data-id="{{item.id}}" bindtap="edit">修改</button><button class="text-button danger" data-id="{{item.id}}" bindtap="remove">删除</button></view></view>
+  <view class="empty" wx:if="{{!items.length}}">还没有保存任何事实</view>
+</view>
