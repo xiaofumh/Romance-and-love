@@ -72,7 +72,7 @@ export type ChatJob = { id: string; conversationId: string; roleId: string; hash
   errorCode?: string; day: string; kind?: 'reply' | 'initiative';
   metrics?: { contextRounds: 6 | 12; historyMessages: number; elapsedMs: number; inputTokens?: number; outputTokens?: number;
     failureStage?: string; failureKind?: string;
-    requestAudit?: { historySha256: string; historyMessages: number; protocol: string } } };
+    requestAudit?: { historySha256: string; historyMessages: number; protocol: string; chatTemperature?: number } } };
 export type CompanionState = { roles: CompanionRole[]; conversations: Conversation[]; documents: ReferenceDocument[];
   memories: CompanionMemory[]; jobs: ChatJob[] };
 export function emptyCompanion(): CompanionState { return { roles: [], conversations: [], documents: [], memories: [], jobs: [] }; }

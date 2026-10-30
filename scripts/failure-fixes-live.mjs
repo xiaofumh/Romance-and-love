@@ -6,7 +6,9 @@ const require = createRequire(new URL('../package.json', import.meta.url));
 const out = path.resolve(process.argv.find(x => x.startsWith('--out='))?.slice(6) ?? 'output/failure-fixes');
 mkdirSync(out, { recursive: true });
 const id = Date.now().toString(36), report = { version: '0.5.1', syntheticOnly: true, mocked: false,
-  originalChatsOpened: false, consentChanged: false, plannedMaximumModelAttempts: 10, attempts: 0, replies: [] };
+  originalChatsOpened: false, consentChanged: false, qualityReviewRequired: true, plannedMaximumModelAttempts: 10, attempts: 0, replies: [] };
+const expectedTemperature = process.argv.find(x => x.startsWith('--expected-temperature='))?.split('=')[1];
+if (expectedTemperature != null && !/^(?:0(?:\.\d{1,2})?|1(?:\.0{1,2})?)$/.test(expectedTemperature)) throw new Error('INVALID_EXPECTED_TEMPERATURE');
 let mini, roleId, serial = 0, stage = 'connect', pendingGeneration;
 async function rpc(action, payload = {}, clientRequestId) {
   const key = `v051_${id}_${serial++}`;
@@ -76,9 +78,12 @@ try {
   report.reportedReplyNeedsSemanticReview = report.replies[6].text;
   report.pauseResumePassed = report.replies[8].interaction === 'quiet' && report.replies[9].interaction === 'listening';
   report.default12Passed = report.replies.every(r => r.contextRounds === 12);
+  report.observedChatTemperatures = [...new Set(report.replies.map(r => r.metrics?.requestAudit?.chatTemperature ?? null))];
+  report.expectedTemperaturePassed = expectedTemperature == null || report.replies.every(r => r.metrics?.requestAudit?.chatTemperature === Number(expectedTemperature));
   report.chatRemainingAfter = (await rpc('session.bootstrap')).chatRemaining;
   report.success = report.concurrentObservationsPassed && report.latestImplicitCorrectionPassed && report.exactAcknowledgementPassed && report.noQuestionsPassed
-    && report.reportedPauseIgnored && report.pauseResumePassed && report.default12Passed;
+    && report.reportedPauseIgnored && report.pauseResumePassed && report.default12Passed && report.expectedTemperaturePassed;
+  report.automatedChecksPassed = report.success;
 } catch (e) { report.success = false; report.failureStage = stage;
   report.errorCode = /^[A-Z_]{1,90}$/.test(String(e?.message)) ? e.message : 'AUTOMATION_FAILED';
   report.hints = [['AUTOMATION_CONNECTION_FAILED', /Failed connecting|ECONNREFUSED/], ['TIMEOUT', /timeout|timed out/i]]

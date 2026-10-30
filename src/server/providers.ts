@@ -21,7 +21,7 @@ function companionOutput(content: string) {
 }
 
 export type ModelConfig = { url: string; apiKey: string; model: string; name: string; timeoutMs: number; jsonMode: boolean;
-  thinking?: 'disabled' | 'enabled' };
+  thinking?: 'disabled' | 'enabled'; chatTemperature?: number };
 function transportFailure(error: unknown): AppError {
   // Fetch can fail either before headers or while reading a successful response.
   // Only inspect the standard error name; provider text/URLs/credentials never
@@ -36,16 +36,22 @@ export function createHttpProvider(config: ModelConfig, transport: typeof fetch 
     const url = new URL(config.url);
     if (url.protocol !== 'https:' || url.username || url.password || !config.apiKey || !config.model)
       throw new AppError('PROVIDER_NOT_CONFIGURED', '请先完成服务端模型配置');
+    if (chat && config.chatTemperature !== undefined && (!Number.isFinite(config.chatTemperature)
+      || config.chatTemperature < 0 || config.chatTemperature > 1
+      || Math.round(config.chatTemperature * 100) / 100 !== config.chatTemperature))
+      throw new AppError('PROVIDER_NOT_CONFIGURED', '聊天采样配置无效');
     let response: Response;
     const wireMessages = chat ? companionMessages(context as ChatContext) : messages(context as ProviderContext);
     // Fingerprint the actual serialized history, not just the upstream selection.
     // No raw prompt, credentials or other user's data are included in job metrics.
     const requestAudit = chat ? { historySha256: createHash('sha256').update(JSON.stringify(wireMessages.slice(2, -1))).digest('hex'),
-      historyMessages: wireMessages.length - 3, protocol: 'window-evidence-v2' } : undefined;
+      historyMessages: wireMessages.length - 3, protocol: 'window-evidence-v2',
+      ...(config.chatTemperature === undefined ? {} : { chatTemperature: config.chatTemperature }) } : undefined;
     try {
       response = await transport(url, { method: 'POST', redirect: 'error',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
         body: JSON.stringify({ model: config.model, messages: wireMessages, stream: false,
+          ...(chat && config.chatTemperature !== undefined ? { temperature: config.chatTemperature } : {}),
           max_tokens: 1024, ...(chat ? { response_format: { type: 'text' } } : config.jsonMode ? { response_format: { type: 'json_object' } } : {}),
           ...(config.thinking ? { thinking: { type: config.thinking } } : {}) }),
         signal: AbortSignal.timeout(config.timeoutMs) });

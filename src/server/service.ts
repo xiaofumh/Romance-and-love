@@ -15,7 +15,7 @@ export interface Provider {
   name: string;
   generate(context: ProviderContext): Promise<{ output: unknown; usage?: { input: number; output: number } }>;
   chat?(context: ChatContext): Promise<{ output: unknown; usage?: { input: number; output: number };
-    requestAudit?: { historySha256: string; historyMessages: number; protocol: string } }>;
+    requestAudit?: { historySha256: string; historyMessages: number; protocol: string; chatTemperature?: number } }>;
 }
 export interface Moderator { check(text: string): Promise<boolean> }
 export type ServiceOptions = {
