@@ -123,6 +123,15 @@ describe('external memory service integration', () => {
     expect(await h.raw('companion.memory.save', { roleId: h.role.id, id: m.id, version: m.version, text: '过时版本', confirmed: true })).toMatchObject({ ok: false, error: { code: 'VERSION_CONFLICT' } });
     await h.send('喝茶'); expect(h.contexts.at(-1)!.memories.map(m => m.text)).toEqual(['不喝茶']); expect(h.contexts.at(-1)!.messages).toEqual([]);
   });
+  it('does not fabricate an original quote after source-message expiry, while respecting independent memory retention', async () => {
+    const h = await setup(); await h.send('我喜欢喝茶');
+    const original = (await h.api('companion.conversation.get', { id: h.chat.id })).conversation.messages[0];
+    const m = await h.save('我喜欢喝茶', { confirmed: true, source: { kind: 'message', conversationId: h.chat.id, messageId: original.id } });
+    h.advance(31 * 86400000);
+    const source = await h.api('companion.memory.source', { id: m.id });
+    expect(source).toMatchObject({ available: false, reason: 'expired-or-deleted' }); expect(source).not.toHaveProperty('text');
+    expect((await h.data()).memories[0]).toMatchObject({ id: m.id, status: 'confirmed' });
+  });
   it('inspects without model calls or quota changes, records content-free audits, and scrubs them on deletion', async () => {
     const h = await setup(), m = await h.save('虚构私密事实', { confirmed: true, subject: 'user' });
     const before = await h.api('session.bootstrap');

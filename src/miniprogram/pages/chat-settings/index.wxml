@@ -1,4 +1,20 @@
 <view class="page"><view class="card"><view class="row"><view class="avatar">{{role.name}}</view><view class="grow"><view class="section-title">{{role.name}}</view><view class="hint">AI角色 · {{role.personality}} · {{role.emotion || '自然回应'}}</view></view></view><view class="setting-row" bindtap="role">人格、称呼、关系与情绪<text>›</text></view><view class="setting-row" bindtap="memory">事实记忆与纠错<text>›</text></view><view class="setting-row" bindtap="importData">导入历史参考<text>›</text></view></view>
-  <view class="card"><view class="section-title">当前会话：{{contextRounds}}轮上下文</view><view class="chips"><view class="chip {{contextRounds === 6 ? 'selected' : ''}}" data-rounds="6" bindtap="context">6轮 · 精简</view><view class="chip {{contextRounds === 12 ? 'selected' : ''}}" data-rounds="12" bindtap="context">12轮 · 默认</view></view><view class="hint">{{contextRounds === 12 ? '按最近12条用户消息分组，携带对应回复和主动接话，最多36条语义消息。' : '原版最多12条近期消息，主动消息也占条数。'}} 每条历史仍最多600字符，再加本次输入；气泡分段不增加轮数。</view><view class="hint">当前保存{{count}}条正文，最多40条、最长30天。纠错、删除、过期或停用记忆会缩短可用上下文，不会补读被排除的历史。另附最多10条有效确认记忆和3组相关参考。</view><view class="hint">北京时间由服务端提供，显示最近同步时刻，不证明用户的地点或活动。新会话默认12轮，已明确选过6轮的会话保留原选择。</view><view class="demo-note" wx:if="{{contextResetReason}}">{{contextResetReason}}</view></view>
-  <view class="card"><view class="section-title">自然接话</view><view class="hint">角色根据当前对话承接、延伸或收尾，不必选择聊天模式。说“先不聊了”可暂停主动，说“继续聊”可恢复；“别聊工作”只避开对应话题。</view><view class="hint">{{role.proactiveEnabled ? "已允许主动接话；仍会尊重暂停、话题边界和留白。" : "主动接话已关闭，可在角色设置中调整。"}} 仅打开当前聊天页时可发起，写草稿或离开页面后不再新发起。已发起的模型调用可能计费。</view><view class="hint" wx:if="{{interactionMode === 'quiet'}}">本会话已暂停主动，可直接发消息继续聊天；恢复主动请明确说“继续聊”。</view><button class="text-button" bindtap="role">角色与主动接话设置 ›</button></view><view class="card"><button class="text-button danger" bindtap="remove">删除当前会话</button></view>
+  <view class="card">
+    <view class="section-title">当前会话：{{contextRounds}}轮上下文</view>
+    <view class="chips"><view class="chip {{contextRounds === 6 ? 'selected' : ''}}" data-rounds="6" bindtap="context">6轮 · 精简</view><view class="chip {{contextRounds === 12 ? 'selected' : ''}}" data-rounds="12" bindtap="context">12轮 · 默认</view></view>
+    <view class="hint">{{contextRounds === 12 ? '按最近12条用户消息分组，携带对应回复和主动接话，最多36条语义消息。' : '原版最多12条近期消息，主动消息也占条数。'}} 每条历史仍最多600字符，再加本次输入；气泡分段不增加轮数。</view>
+    <view class="hint">当前保存{{count}}条正文，最多40条、最长30天。纠错、删除、过期或停用记忆会缩短可用上下文，不会补读被排除的历史。另附最多10条有效确认记忆和3组相关参考。</view>
+    <view class="hint">每次请求由服务端提供北京时间，聊天页不显示同步时间条；时间不证明用户地点或活动。新会话默认12轮，已明确选过6轮的会话保留原选择。</view>
+    <view class="demo-note" wx:if="{{contextResetReason}}">{{contextResetReason}}</view>
+  </view>
+  <view class="card">
+    <view class="section-title">自然接话</view>
+    <view class="hint">角色根据当前对话承接、延伸或收尾，不必选择聊天模式。说“先不聊了”可暂停主动，说“继续聊”可恢复；“别聊工作”只避开对应话题。</view>
+    <view class="hint">{{role.proactiveEnabled ? '已允许主动接话；仍会尊重暂停、话题边界和留白。' : '主动接话已关闭，可在角色设置中调整。'}}</view>
+    <view class="hint" wx:if="{{role.proactiveEnabled && role.autonomousEnabled}}">已选择新版自主模式。后台调度成功部署后，可以在你没有新消息或关闭页面时生成内容，保存在同一小程序会话；不发送微信好友消息或系统通知。连续最多3次主动尝试、间隔至少5分钟、每日最多6次，北京时间23点至8点安静。模型可以选择等待，尝试可能计费。</view>
+    <view class="hint" wx:elif="{{role.proactiveEnabled}}">当前为旧版页面内接话：仅打开聊天页且无草稿时发起，每轮最多一次。若要使用新版后台自主机制，请在角色设置中明确关闭再开启主动开关，阅读新版说明。</view>
+    <view class="hint" wx:if="{{interactionMode === 'quiet'}}">本会话已暂停主动，可直接发消息继续聊天；恢复主动请明确说“继续聊”。</view>
+    <button class="text-button" bindtap="role">角色与主动接话设置 ›</button>
+  </view>
+  <view class="card"><button class="text-button danger" bindtap="remove">删除当前会话</button></view>
 </view>
