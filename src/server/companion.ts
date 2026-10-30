@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ChatOutput, ImportInput, RoleInput, MemoryInput, CONTEXT_LIMITS, DEFAULT_CONTEXT_ROUNDS, STORAGE_LIMITS, emptyCompanion, parseReference, redactPrivate, utf8Bytes, memoryActive, memoryConflict } from '../shared/companion';
+import { ChatOutput, ImportInput, RoleInput, MemoryInput, CONTEXT_LIMITS, DEFAULT_CONTEXT_ROUNDS, STORAGE_LIMITS, emptyCompanion, parseReference, redactPrivate, utf8Bytes, memoryConflict } from '../shared/companion';
 import type { CompanionState, CompanionMemory, Conversation, ReferenceDocument, ChatJob } from '../shared/companion';
 import { POLICY_VERSION } from '../shared/contracts';
 import type { Envelope } from '../shared/contracts';
@@ -14,6 +14,9 @@ import { chooseInitiativeTopic, repeatedInitiative, INITIATIVE_WAIT } from './in
 import { buildDialoguePlan } from './dialogue';
 import { beijingClock } from '../shared/beijing-time';
 import { primaryConversation } from './primary-conversation';
+import { AUTONOMOUS_DAILY_LIMIT } from './autonomy';
+import { MEMORY_POLICY, appendMemorySource, explicitMemoryCandidate, memoryKey, memoryUsesDocument, selectMemories } from './companion-memory';
+import type { MemorySource } from '../shared/companion';
 
 const Id = z.string().min(1).max(100), ById = z.object({ id: Id }).strict();
 function take<T extends { id: string }>(items: T[], id: string): T { return items.find(v => v.id === id) ?? fail('RESOURCE_UNAVAILABLE', '记录不存在或无权访问'); }
@@ -75,6 +78,11 @@ export function createCompanion(o: ServiceOptions) {
       if (!o.enabled || !o.provider.chat) fail('SERVICE_UNAVAILABLE', '聊天模型尚未配置');
       if (isInitiative && o.mode !== 'cloud') fail('SERVICE_UNAVAILABLE', '本地模拟不启动主动模型生成');
       if (!s.settings.historyEnabled) fail('HISTORY_REQUIRED', '请明确开启会话保存后再聊天；关闭后仍可查看和删除旧记录');
+      if (!isInitiative && role.autonomousEnabled) for (const job of c.jobs) {
+        if (job.status === 'PROCESSING' && job.kind === 'initiative' && job.conversationId === conversation.id) {
+          job.status = 'CANCELLED'; job.errorCode = 'DATA_CHANGED';
+        }
+      }
       if (c.jobs.some(j => j.status === 'PROCESSING')) fail('CHAT_PENDING', '上一条消息仍在处理中，请稍候', true);
       if (c.jobs.filter(j => j.createdAt > now() - 60000).length >= 12) fail('RATE_LIMITED', '消息发送较频繁，请稍后再试', true);
       if (!chatRemaining(s, now(), chatDailyLimit(o, uid))) fail('QUOTA_EXCEEDED', '今日聊天体验额度已用完');
@@ -82,21 +90,28 @@ export function createCompanion(o: ServiceOptions) {
       // Decide before reserving a model attempt, and use precisely the same
       // history as generation. No generic rotating topics when the gate waits.
       const initiativeTopic = isInitiative ? chooseInitiativeTopic({ messages: recent, interaction: conversation.interaction?.mode },
-        conversation.interaction?.recentTopics ?? [], o.hash, now()) : undefined;
+        conversation.interaction?.recentTopics ?? [], o.hash, now(), role.autonomousEnabled === true) : undefined;
       if (isInitiative) {
+        if (role.autonomousEnabled && c.jobs.filter(j => j.roleId === role.id && j.kind === 'initiative' && j.day === dateKey(now())).length >= AUTONOMOUS_DAILY_LIMIT)
+          fail('INITIATIVE_NOT_READY', '今天先留些空间，主动接话已暂停');
         if (!initiativeStatus(conversation, role, now(), s.settings.memoryEnabled).available)
           fail('INITIATIVE_NOT_READY', '当前不适合主动接话，已暂停；无需重复尝试');
         if (!initiativeTopic) fail('INITIATIVE_NOT_READY', '当前没有适合继续的话题，先留些空间');
         const latest = [...currentHistory(conversation, s.settings.memoryEnabled)].reverse().find(m => m.speaker === 'user')!;
+        const attempts = conversation.interaction?.autonomousCycle?.requestId === latest.requestId ? conversation.interaction.autonomousCycle.attempts : 0;
         conversation.interaction = { ...conversation.interaction, mode: conversation.interaction?.mode ?? 'listening',
+          ...(role.autonomousEnabled ? { autonomousCycle: { requestId: latest.requestId, attempts: attempts + 1 } } : {}),
           initiativeAttemptFor: latest.requestId, lastInitiativeAt: now() };
-      } else conversation.interaction = { ...conversation.interaction, mode: nextInteractionMode(p.text, conversation.interaction?.mode) };
+      } else conversation.interaction = { ...conversation.interaction, mode: nextInteractionMode(p.text, conversation.interaction?.mode), composingUntil: 0, backgroundRetryAfter: 0 };
       const contextRounds = conversation.contextRounds ?? DEFAULT_CONTEXT_ROUNDS;
+      // A background wake has no new user text. Retrieve against its actual
+      // topic anchor, not an empty string or the model's previous suggestion.
+      const memoryQuery = isInitiative ? initiativeTopic?.anchor ?? '' : p.text;
+      const selection = selectMemories(c.memories, role.id, memoryQuery, now(), s.settings.memoryEnabled);
       const context: ChatContext = { role, message: redactPrivate(p.text), clock: beijingClock(now()),
         intent: isInitiative ? 'initiative' : 'reply', interaction: conversation.interaction.mode,
-        messages: recent.map(m => ({ speaker: m.speaker, text: redactPrivate(m.text).slice(0, CONTEXT_LIMITS.historyCharacters), createdAt: m.createdAt })),
-        memories: s.settings.memoryEnabled ? c.memories.filter(m => m.roleId === role.id && memoryActive(m, now())).slice(0, CONTEXT_LIMITS.memories) : [],
-        examples: retrieve(c.documents, role.id, p.text) };
+        messages: recent.map(m => ({ speaker: m.speaker, text: redactPrivate(m.text).slice(0, CONTEXT_LIMITS.historyCharacters), createdAt: m.createdAt, kind: m.kind })),
+        memories: selection.memories, examples: retrieve(c.documents, role.id, memoryQuery) };
       context.dialoguePlan = buildDialoguePlan(context, now());
       if (isInitiative && initiativeTopic) {
         context.initiativeTopic = initiativeTopic;
@@ -104,8 +119,11 @@ export function createCompanion(o: ServiceOptions) {
       }
       // Redact every outbound field, not just the current message.
       const safe = JSON.parse(redactPrivate(JSON.stringify(context))) as ChatContext;
+      // 完整选择明细只保留最近8次请求，避免1000轮测试把同一批记忆
+      // 分数复制1000次撑满账号文档；其余请求保留原有幂等状态和用量。
+      for (const j of c.jobs.slice(0, -7)) if (j.metrics) delete j.metrics.memorySelection;
       c.jobs.push({ id, conversationId: p.conversationId, roleId: role.id, hash, revision: s.revision,
-        kind: isInitiative ? 'initiative' : 'reply', metrics: { contextRounds, historyMessages: recent.length, elapsedMs: 0 },
+        kind: isInitiative ? 'initiative' : 'reply', metrics: { contextRounds, historyMessages: recent.length, elapsedMs: 0, memorySelection: selection.audit },
         status: 'PROCESSING', createdAt: now(), leaseUntil: now() + timeout + 2000, day: dateKey(now()) });
       return { run: { context: safe, revision: s.revision, day: dateKey(now()) } };
     });
@@ -167,7 +185,19 @@ export function createCompanion(o: ServiceOptions) {
           // attempt, while storing no fake assistant message or control token.
           return result(c, id);
         }
-        if (!isInitiative) conversation.messages.push({ id: o.id(), requestId: id, speaker: 'user', text: redactPrivate(p.text), createdAt: job.createdAt, memoryUsed: run.context.memories.length > 0 });
+        if (!isInitiative) {
+          const message = { id: o.id(), requestId: id, speaker: 'user' as const, text: redactPrivate(p.text), createdAt: job.createdAt, memoryUsed: run.context.memories.length > 0 };
+          conversation.messages.push(message);
+          const text = s.settings.memoryEnabled ? explicitMemoryCandidate(message) : undefined;
+          if (text && c.memories.filter(m => m.roleId === conversation.roleId).length < MEMORY_POLICY.storedPerRole) {
+            const candidate: CompanionMemory = { id: o.id(), roleId: conversation.roleId, text, subject: 'unspecified',
+              status: 'pending', version: 1, createdAt: now(), updatedAt: now(), kind: 'fact', importance: 3,
+              sources: [{ kind: 'message', conversationId: conversation.id, messageId: message.id, speaker: 'user', occurredAt: message.createdAt, recordedAt: now() }] };
+            // Only after a successful chat commit, with the real saved user
+            // message as source. Replays do not create extra candidates.
+            if (!c.memories.some(m => m.roleId === candidate.roleId && memoryKey(m) === memoryKey(candidate))) c.memories.unshift(candidate);
+          }
+        }
         conversation.messages.push(
           { id: o.id(), requestId: id, speaker: 'assistant', text, createdAt: now(), mode: o.mode, memoryUsed: run.context.memories.length > 0,
             kind: isInitiative ? 'initiative' : 'reply', ...(run.context.role.bubbleStyle === 'natural' ? { parts: naturalBubbles(text, 'natural') } : {}),
@@ -210,9 +240,10 @@ export function createCompanion(o: ServiceOptions) {
       }
       if (event.action === 'companion.conversation.get') {
         const { id } = ById.parse(p), v = take(c.conversations, id), role = take(c.roles, v.roleId);
-        const status = initiativeStatus(v, role, now(), s.settings.memoryEnabled);
+        const status = role.autonomousEnabled && c.jobs.filter(j => j.roleId === role.id && j.kind === 'initiative' && j.day === dateKey(now())).length >= AUTONOMOUS_DAILY_LIMIT
+          ? { enabled: true, available: false, reason: 'daily-limit', availableAt: 0 } : initiativeStatus(v, role, now(), s.settings.memoryEnabled);
         const topic = chooseInitiativeTopic({ messages: selectContext(v, s.settings.memoryEnabled), interaction: v.interaction?.mode },
-          v.interaction?.recentTopics ?? [], o.hash, now());
+          v.interaction?.recentTopics ?? [], o.hash, now(), role.autonomousEnabled === true);
         const initiative = ['ready', 'waiting'].includes(status.reason) && !topic
           ? { ...status, available: false, availableAt: 0, reason: 'no-topic' } : status;
         return { conversation: { ...v, contextRounds: v.contextRounds ?? DEFAULT_CONTEXT_ROUNDS }, role, jobs: c.jobs.filter(j => j.conversationId === id).slice(-8),
@@ -221,9 +252,26 @@ export function createCompanion(o: ServiceOptions) {
       if (event.action === 'companion.job.get') { const { id } = ById.parse(p); return result(c, id); }
       if (event.action === 'companion.data') {
         const { id } = ById.parse(p); take(c.roles, id);
-        return { documents: c.documents.filter(d => d.roleId === id).map(({ turns, ...d }) => ({ ...d, count: turns.length })), memories: c.memories.filter(m => m.roleId === id) };
+        return { documents: c.documents.filter(d => d.roleId === id).map(({ turns, ...d }) => ({ ...d, count: turns.length })), memories: c.memories.filter(m => m.roleId === id), serverTime: now(),
+          lastMemorySelection: [...c.jobs].reverse().find(j => j.roleId === id && j.metrics?.memorySelection)?.metrics?.memorySelection };
       }
       if (event.action === 'companion.document.get') { const { id } = ById.parse(p); return take(c.documents, id); }
+      if (event.action === 'companion.memory.source') {
+        const q = z.object({ id: Id, sourceIndex: z.number().int().min(0).max(3).optional() }).strict().parse(p);
+        const m = take(c.memories, q.id), source = m.sources?.[q.sourceIndex ?? (m.sources.length - 1)];
+        if (!source || source.kind === 'manual') return { available: false, reason: 'manual' };
+        let text: string | undefined;
+        if (source.kind === 'message') {
+          const conversation = c.conversations.find(v => v.id === source.conversationId && v.roleId === m.roleId);
+          text = conversation?.messages.find(v => v.id === source.messageId && v.speaker === 'user')?.text;
+        } else {
+          const document = c.documents.find(d => d.id === source.documentId && d.roleId === m.roleId);
+          text = document?.turns[(source.turn ?? 0) - 1]?.text;
+        }
+        // 来源指针不是永久原文副本。消息到期后如实说明不可用，不能
+        // 用记忆摘要冒充原话；只返回有限预览，避免下载整份大文档。
+        return { available: text != null, source, ...(text == null ? { reason: 'expired-or-deleted' } : { text: text.slice(0, 2000), truncated: text.length > 2000 }) };
+      }
       if (event.action === 'companion.export') { z.object({ confirmed: z.literal(true) }).strict().parse(p); return { exportedAt: now(), roles: c.roles, conversations: c.conversations, documents: c.documents, memories: c.memories }; }
       // Destructive operations remain available after revocation; creation requires current consent.
       if (event.action === 'companion.clear') {
@@ -233,7 +281,7 @@ export function createCompanion(o: ServiceOptions) {
         const q = z.object({ id: Id, kind: z.enum(['role', 'conversation', 'document', 'memory']) }).strict().parse(p);
         if (q.kind === 'role') { take(c.roles, q.id); c.roles = c.roles.filter(v => v.id !== q.id); c.conversations = c.conversations.filter(v => v.roleId !== q.id); c.documents = c.documents.filter(v => v.roleId !== q.id); c.memories = c.memories.filter(v => v.roleId !== q.id); }
         if (q.kind === 'conversation') { take(c.conversations, q.id); c.conversations = c.conversations.filter(v => v.id !== q.id); }
-        if (q.kind === 'document') { take(c.documents, q.id); const affected = new Set(c.memories.filter(m => m.documentId === q.id).map(m => m.roleId)); c.documents = c.documents.filter(v => v.id !== q.id); c.memories = c.memories.filter(v => v.documentId !== q.id);
+        if (q.kind === 'document') { take(c.documents, q.id); const affected = new Set(c.memories.filter(m => memoryUsesDocument(m, q.id)).map(m => m.roleId)); c.documents = c.documents.filter(v => v.id !== q.id); c.memories = c.memories.filter(v => !memoryUsesDocument(v, q.id));
           // Drop entire referenced rounds, not only citation labels, to avoid resurrecting source text.
           for (const v of c.conversations) if (affected.has(v.roleId) || v.messages.some(m => m.sources?.some(e => e.documentId === q.id))) {
             v.messages = []; if (v.interaction) v.interaction.recentTopics = [];
@@ -243,9 +291,24 @@ export function createCompanion(o: ServiceOptions) {
           // Old model replies can restate a deleted fact. Reset that role's conversation context too.
           for (const v of c.conversations.filter(v => v.roleId === m.roleId)) { v.messages = []; if (v.interaction) v.interaction.recentTopics = []; }
         }
+        // Audits contain IDs/scores only, but also remove dead pointers so a
+        // deleted memory cannot remain presented as a current selection.
+        const live = new Set(c.memories.map(m => m.id));
+        for (const j of c.jobs) if (j.metrics?.memorySelection) j.metrics.memorySelection.entries = j.metrics.memorySelection.entries.filter(e => live.has(e.id));
         cancelPending(s); return { deleted: true };
       }
       allowed(s);
+      if (event.action === 'companion.memory.inspect') {
+        const q = z.object({ roleId: Id, text: z.string().trim().max(1200) }).strict().parse(p); take(c.roles, q.roleId);
+        // This dry run never calls the provider, changes evidence or spends quota.
+        return selectMemories(c.memories, q.roleId, q.text, now(), s.settings.memoryEnabled).audit;
+      }
+      if (event.action === 'companion.presence') {
+        const q = z.object({ conversationId: Id, composing: z.boolean() }).strict().parse(p);
+        const v = take(c.conversations, q.conversationId);
+        v.interaction = { ...v.interaction, mode: v.interaction?.mode ?? 'listening', composingUntil: q.composing ? now() + 90000 : 0 };
+        return { updated: true };
+      }
       if (event.action === 'companion.interaction.configure') {
         const q = z.object({ id: Id, version: z.number().int().positive(), mode: z.enum(['listening', 'light', 'quiet']) }).strict().parse(p);
         const v = take(c.conversations, q.id);
@@ -304,15 +367,42 @@ export function createCompanion(o: ServiceOptions) {
         if (old && (q.version !== old.version || q.roleId !== old.roleId)) fail('VERSION_CONFLICT', '记忆已变更，请刷新');
         if (q.documentId && take(c.documents, q.documentId).roleId !== q.roleId) fail('RESOURCE_UNAVAILABLE', '资料不属于此角色');
         if (q.confirmed && !s.settings.memoryEnabled) fail('CONSENT_REQUIRED', '请先在“我的”开启已确认记忆');
-        if (!old && c.memories.filter(m => m.roleId === q.roleId).length >= 10) fail('LIMIT_REACHED', '每个角色最多10条候选及确认记忆');
+        // Resolve provenance inside the same ownership-checked transaction.
+        // Client source notes remain annotations, never verified evidence.
+        let source: MemorySource | undefined;
+        if (q.source?.kind === 'message') {
+          const conversation = take(c.conversations, q.source.conversationId);
+          if (conversation.roleId !== q.roleId) fail('RESOURCE_UNAVAILABLE', '来源不属于此角色');
+          const message = take(conversation.messages, q.source.messageId);
+          if (message.speaker !== 'user' || !message.text.includes(redactPrivate(q.text))) fail('INVALID_INPUT', '消息来源须为包含这段原文的用户消息；改写内容请手动添加');
+          source = { ...q.source, speaker: 'user', occurredAt: message.createdAt, recordedAt: now() };
+        } else if (q.source?.kind === 'document') {
+          const document = take(c.documents, q.source.documentId), turn = document.turns[q.source.turn - 1];
+          if (document.roleId !== q.roleId) fail('RESOURCE_UNAVAILABLE', '来源不属于此角色');
+          if (!turn) return fail('INVALID_INPUT', '资料消息序号无效');
+          if (!turn.text.includes(redactPrivate(q.text))) fail('INVALID_INPUT', '资料来源须包含这段原文');
+          if (q.documentId && q.documentId !== document.id) fail('INVALID_INPUT', '资料来源不一致');
+          source = { ...q.source, speaker: turn.speaker, recordedAt: now() };
+        }
+        const subject = q.subject ?? old?.subject ?? (q.documentId || q.source?.kind === 'document' ? 'reference' : 'unspecified');
+        const duplicate = !old && c.memories.find(m => m.roleId === q.roleId && memoryKey(m) === memoryKey({ text: redactPrivate(q.text), subject, topic: q.topic }));
+        if (duplicate) return duplicate; // importing twice is not two independent facts or confirmation
+        if (!old && c.memories.filter(m => m.roleId === q.roleId).length >= MEMORY_POLICY.storedPerRole) fail('LIMIT_REACHED', '每个角色最多60条候选及确认记忆，请清理无效候选');
         const validFor = q.validFor ?? old?.validFor ?? 'long-term';
         const expiresAt = q.validFor == null && old ? old.expiresAt : validFor === 'today'
           ? Date.parse(`${dateKey(now())}T00:00:00+08:00`) + 86400000 : validFor === '7days' ? now() + 7 * 86400000 : undefined;
         if (q.confirmed && expiresAt != null && expiresAt <= now()) fail('MEMORY_EXPIRED', '这条记忆已过期，请编辑有效期后重新确认');
+        const changed = Boolean(old && old.text !== redactPrivate(q.text));
         const memory: CompanionMemory = { ...old, id: old?.id ?? o.id(), roleId: q.roleId, text: redactPrivate(q.text), status: q.confirmed ? 'confirmed' : 'pending',
           version: (old?.version ?? 0) + 1, createdAt: old?.createdAt ?? now(), ...(q.documentId ? { documentId: q.documentId } : {}),
-          subject: q.subject ?? old?.subject ?? (q.documentId ? 'reference' : 'unspecified'), topic: redactPrivate(q.topic ?? old?.topic ?? ''),
-          sourceNote: redactPrivate(q.sourceNote ?? old?.sourceNote ?? ''), validFor, expiresAt, expiryHandled: false };
+          subject, topic: redactPrivate(q.topic ?? old?.topic ?? ''),
+          sourceNote: redactPrivate(q.sourceNote ?? old?.sourceNote ?? ''), validFor, expiresAt, expiryHandled: false,
+          kind: q.kind ?? old?.kind ?? (q.subject === 'role' ? 'setting' : 'fact'), importance: q.importance ?? old?.importance ?? 3,
+          updatedAt: now(), confirmedAt: q.confirmed ? now() : undefined,
+          // Corrections do not inherit an old quote as evidence for new wording.
+          sources: source ? appendMemorySource(changed ? [] : old?.sources, source)
+            : changed || !old ? [{ kind: 'manual', recordedAt: now() }] : old.sources ?? [{ kind: 'manual', recordedAt: old.createdAt }] };
+        if (q.source?.kind === 'document') memory.documentId = q.source.documentId;
         if (q.confirmed && memoryConflict(memory, c.memories.filter(m => m.roleId === q.roleId), now()))
           fail('MEMORY_CONFLICT', '同一主体与主题已有不同的有效事实，请编辑并纠正原条目；系统不会擅自覆盖');
         c.memories = [memory, ...c.memories.filter(m => m.id !== memory.id)];

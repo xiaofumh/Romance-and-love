@@ -3,7 +3,7 @@ import { PERSONALITIES, CLOSENESS, EMOTIONS, rolePreferences } from '../../../sh
 import { POLICY_VERSION } from '../../../shared/contracts';
 import type { CompanionRole, CompanionView } from '../../../shared/companion';
 Page({ data: { id: '', version: 0, step: 0, name: '', relationship: 'friend', personality: '温柔倾听',
-  description: '', boundaries: '', ...rolePreferences({}), personalities: [...PERSONALITIES], closenessOptions: [...CLOSENESS], emotions: [...EMOTIONS], agreed: false, busy: false },
+  description: '', boundaries: '', autonomousEnabled: false, ...rolePreferences({ bubbleStyle: 'natural' }), personalities: [...PERSONALITIES], closenessOptions: [...CLOSENESS], emotions: [...EMOTIONS], agreed: false, busy: false },
   async onLoad(q: Record<string, string>) { if (!q.id) return;
     try { const v = await call<CompanionView>('companion.list'), role = v.roles.find(r => r.id === q.id); if (!role) throw new Error('角色不存在'); this.setData({ ...role, ...rolePreferences(role), step: 2 }); } catch(e) { toast(e); }
   },
@@ -15,7 +15,7 @@ Page({ data: { id: '', version: 0, step: 0, name: '', relationship: 'friend', pe
   next() { this.setData({ step: Math.min(2, this.data.step + 1) }); },
   back() { this.setData({ step: Math.max(0, this.data.step - 1) }); },
   agree() { this.setData({ agreed: !this.data.agreed }); },
-  changeInitiative(e: WechatMiniprogram.SwitchChange) { this.setData({ proactiveEnabled: e.detail.value }); },
+  changeInitiative(e: WechatMiniprogram.SwitchChange) { this.setData({ proactiveEnabled: e.detail.value, autonomousEnabled: e.detail.value }); },
   bubble(e: WechatMiniprogram.TouchEvent) { const v = e.currentTarget.dataset.value; if (v === 'single' || v === 'natural') this.setData({ bubbleStyle: v }); },
   legal() { wx.navigateTo({ url: '/pages/legal/index' }); },
   async save() {
@@ -28,7 +28,7 @@ Page({ data: { id: '', version: 0, step: 0, name: '', relationship: 'friend', pe
       const role = await call<CompanionRole>('companion.role.save', { ...(d.id ? { id: d.id, version: d.version } : {}), name: d.name,
         relationship: d.relationship, personality: d.personality, description: d.description, boundaries: d.boundaries,
         userAddress: d.userAddress, selfAddress: d.selfAddress, closeness: d.closeness, emotion: d.emotion, habits: d.habits,
-        proactiveEnabled: d.proactiveEnabled, bubbleStyle: d.bubbleStyle });
+          proactiveEnabled: d.proactiveEnabled, autonomousEnabled: d.autonomousEnabled, bubbleStyle: d.bubbleStyle });
       this.setData({ id: role.id, version: role.version }); wx.showToast({ title: '角色已保存' }); wx.navigateBack();
     } catch(e) { toast(e); } finally { this.setData({ busy: false }); }
   },

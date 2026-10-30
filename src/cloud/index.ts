@@ -6,6 +6,7 @@ import { cloudBudget, cloudRepository } from './repository';
 import { createContentReview } from './content-review';
 import { createScreenshotProvider } from '../server/screenshot-provider';
 import { safeDiagnostic } from './diagnostics';
+import { autonomyTick } from './autonomy-tick';
 
 // External SDKs are installed by CloudBase from the cloud function's package.json.
 const cloud = require('wx-server-sdk');
@@ -41,6 +42,12 @@ function getService() {
 export async function main(event: unknown) {
   try {
     const context = cloud.getWXContext();
+    if (!context.OPENID && env.TRIGGER_SRC === 'timer' && (event as { Type?: string })?.Type === 'Timer') {
+      const secret = env.ASSISTANT_USER_HASH_SECRET;
+      if (!secret || secret.length < 32) throw new Error('MISSING_SERVER_SECRET');
+      return await autonomyTick(db, cloudRepository(db), (uid, input) => getService().handle(uid, input),
+        text => createHmac('sha256', secret).update(text).digest('hex'));
+    }
     if (!context.OPENID) return { ok: false, requestId: randomUUID(), error: { code: 'UNAUTHENTICATED', message: '请通过微信小程序调用', retryable: false } };
     const secret = env.ASSISTANT_USER_HASH_SECRET;
     if (!secret || secret.length < 32) throw new Error('MISSING_SERVER_SECRET');

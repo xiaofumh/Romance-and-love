@@ -3,7 +3,7 @@ import { z } from 'zod';
 // Mini-program runtimes restrict dynamic Function/eval. Use Zod's interpreter everywhere.
 z.config({ jitless: true });
 
-export const POLICY_VERSION = '2026-10-18.v0.2-companion';
+export { POLICY_VERSION } from './policy';
 export const SCENES = [
   { value: 'daily', label: '日常聊天' },
   { value: 'relationship', label: '亲密关系' },

@@ -1,7 +1,7 @@
 {
   "appid": "wxcf99a03236cc4eca",
   "projectname": "tale",
-  "description": "相伴AI V0.5.3；消息即时显示",
+  "description": "相伴AI V0.6研发版；可追溯记忆与主动相处",
   "compileType": "miniprogram",
   "miniprogramRoot": "dist/miniprogram/",
   "cloudfunctionRoot": "dist/cloudfunctions/",

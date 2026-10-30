@@ -41,9 +41,14 @@ export function maintain(s: UserState, now: number): void {
   if (s.companion) {
     const c = s.companion;
     const expired = new Set(c.documents.filter(d => d.expiresAt <= now).map(d => d.id));
-    const affected = new Set(c.memories.filter(m => m.documentId && expired.has(m.documentId)).map(m => m.roleId));
+    // Attached source documents expire too; relying on legacy documentId alone
+    // would keep derived facts alive after their source had been removed.
+    const expiredSource = (m: (typeof c.memories)[number]) => Boolean(m.documentId && expired.has(m.documentId)) || Boolean(m.sources?.some(s => s.documentId && expired.has(s.documentId)));
+    const affected = new Set(c.memories.filter(expiredSource).map(m => m.roleId));
     c.documents = c.documents.filter(d => !expired.has(d.id));
-    c.memories = c.memories.filter(m => !m.documentId || !expired.has(m.documentId));
+    c.memories = c.memories.filter(m => !expiredSource(m));
+    const liveMemories = new Set(c.memories.map(m => m.id));
+    for (const j of c.jobs) if (j.metrics?.memorySelection) j.metrics.memorySelection.entries = j.metrics.memorySelection.entries.filter(e => liveMemories.has(e.id));
     const expiredMemories = c.memories.filter(m => m.expiresAt != null && m.expiresAt <= now && !m.expiryHandled);
     for (const m of expiredMemories) { m.expiryHandled = true; resetRoleContext(c, m.roleId, '短期记忆已过期，旧消息保留但不再作为上下文'); }
     for (const v of c.conversations) {

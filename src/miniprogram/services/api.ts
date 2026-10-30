@@ -9,6 +9,10 @@ import { config } from '../config';
 const STORAGE_KEY = 'communication-assistant.v0.1.demo';
 const MODE_KEY = 'communication-assistant.v0.1.mode';
 let serial = 0;
+let listRevision = 0, listReset = 0;
+export function getListSignal() { return { revision: listRevision, reset: listReset }; }
+const listMutation = /^(?:companion\.(?:send|initiative|role\.save|conversation\.(?:create|configure)|delete|clear|import|memory\.save)|consent\.update|settings\.update|account\.delete)$/;
+const listPrivateReset = /^(?:companion\.(?:delete|clear)|consent\.update|settings\.update|account\.delete)$/;
 export function uniqueId(): string { return `${Date.now().toString(36)}_${(++serial).toString(36)}_${Math.random().toString(36).slice(2, 10)}`; }
 function localHash(text: string): string {
   let a = 2166136261, b = 0x9e3779b9;
@@ -88,6 +92,7 @@ export function getMode(): 'demo' | 'cloud' {
 }
 export function setMode(mode: 'demo' | 'cloud'): void {
   if (mode === 'cloud' && !config.cloudEnvId) throw new Error('请先在 src/miniprogram/config.ts 填写云开发环境 ID 并重新构建');
+  if (mode !== getMode()) { listRevision++; listReset++; }
   wx.setStorageSync(MODE_KEY, mode);
 }
 export function requestModeSwitch(mode: 'demo' | 'cloud'): void {
@@ -105,6 +110,7 @@ export class ClientError extends Error {
   constructor(public code: string, message: string, public retryable = false) { super(message); }
 }
 export async function call<T = unknown>(action: string, payload: unknown = {}, requestId?: string): Promise<T> {
+  if (listMutation.test(action)) { listRevision++; if (listPrivateReset.test(action)) listReset++; }
   const event: Envelope = { action, payload, ...(requestId ? { clientRequestId: requestId } : {}) };
   let result: ApiResult<T>;
   if (getMode() === 'demo') result = await demoService.handle('local-demo-user', event) as ApiResult<T>;
@@ -117,6 +123,7 @@ export async function call<T = unknown>(action: string, payload: unknown = {}, r
   }
   if (!result || typeof result.ok !== 'boolean') throw new ClientError('INVALID_RESPONSE', '服务响应异常');
   if (!result.ok) throw new ClientError(result.error.code, result.error.message, result.error.retryable);
+  if (listMutation.test(action)) listRevision++;
   return result.data;
 }
 export function toast(error: unknown): void { wx.showToast({ title: error instanceof Error ? error.message : '操作未完成，请重试', icon: 'none', duration: 3000 }); }

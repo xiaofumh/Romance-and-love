@@ -39,10 +39,16 @@ export function initiativeStatus(c: Conversation, role: CompanionRole, now: numb
   const history = currentHistory(c, memoryEnabled), user = [...history].reverse().find(m => m.speaker === 'user');
   if (!user || (c.interaction?.mode ?? interactionMode(user.text)) === 'quiet')
     return { enabled: true, available: false, reason: 'quiet', availableAt: 0 };
-  if (c.interaction?.initiativeAttemptFor === user.requestId)
+  if (role.autonomousEnabled && (c.interaction?.composingUntil ?? 0) > now)
+    return { enabled: true, available: false, reason: 'composing', availableAt: c.interaction!.composingUntil! };
+  const attempts = c.interaction?.autonomousCycle?.requestId === user.requestId ? c.interaction.autonomousCycle.attempts : 0;
+  if (role.autonomousEnabled ? attempts >= 3 : c.interaction?.initiativeAttemptFor === user.requestId)
     return { enabled: true, available: false, reason: 'already-attempted', availableAt: 0 };
-  const availableAt = Math.max((history.at(-1)?.createdAt ?? user.createdAt) + INITIATIVE_LIMITS.idleMs,
-    (c.interaction?.lastInitiativeAt ?? 0) + INITIATIVE_LIMITS.cooldownMs);
+  const bj = new Date(now + 8 * 3600000), day = Math.floor((now + 8 * 3600000) / 86400000);
+  const quietUntil = role.autonomousEnabled ? bj.getUTCHours() < 8 ? day * 86400000 : bj.getUTCHours() >= 23 ? (day + 1) * 86400000 : 0 : 0;
+  const availableAt = Math.max(quietUntil, (history.at(-1)?.createdAt ?? user.createdAt) + INITIATIVE_LIMITS.idleMs,
+    (c.interaction?.lastInitiativeAt ?? 0) + INITIATIVE_LIMITS.cooldownMs,
+    role.autonomousEnabled ? c.interaction?.backgroundRetryAfter ?? 0 : 0);
   return { enabled: true, available: now >= availableAt, reason: now >= availableAt ? 'ready' : 'waiting', availableAt };
 }
 // Paragraph boundaries are explicitly produced by the model. Do not synthesize

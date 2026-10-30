@@ -4,7 +4,7 @@
   <view class="card" wx:if="{{mode === 'demo'}}"><view class="hint">当前是固定模板演示。旧记录保留在本地，不会自动上传或变成真实模型回复。</view><button class="secondary" bindtap="realChat">切换到真实AI聊天</button></view>
   <view class="card" wx:if="{{mode === 'cloud' && bootstrap && !bootstrap.enabled}}"><view>{{bootstrap.contentReview.eligible === false ? '当前账号尚未获得模型访问权限' : '云端模型尚未启用'}}</view><button class="text-button" bindtap="settings">查看连接状态与本账号接入标识</button></view>
   <view class="error" wx:if="{{error}}">{{error}}<button class="text-button" bindtap="load">重新加载</button></view>
-  <view class="empty" wx:if="{{loading}}">正在整理会话…</view>
+  <view class="empty" wx:if="{{loading && !hasLoaded}}">正在整理会话…</view>
   <view class="list-panel" wx:if="{{items.length}}"><view class="contact-row" wx:for="{{items}}" wx:key="id" data-id="{{item.id}}" bindtap="open"><view class="avatar">{{item.avatar}}</view><view class="contact-body"><view class="row"><text class="contact-name">{{item.name}}</text><text class="tiny">{{item.time}}</text></view><view class="ellipsis hint">{{item.preview}}</view><text class="tiny">AI角色 · {{item.personality}}</text></view></view></view>
   <view class="welcome-card" wx:if="{{!loading && !items.length && !error}}"><view class="welcome-glyph">聊</view><view class="section-title">从一句“你好”开始</view><view class="subtitle">先选择一个AI朋友或伴侣角色。<view>每个角色，有自己独立的聊天与记忆。</view></view><button class="primary" bindtap="roles">选择我的聊天伙伴</button></view>
   <view class="footer-note">不读取微信私聊 · 不自动发送消息</view>

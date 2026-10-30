@@ -45,6 +45,13 @@ function cloudEntry(enabled = false, extraEnv: Record<string, string> = {}, mode
 }
 
 describe('cloud entry envelope and trusted identity (SDK mocked)', () => {
+  it('does not let a mini-program caller impersonate the timer even in a timer-enabled runtime', async () => {
+    const c = cloudEntry(false, { TRIGGER_SRC: 'timer' });
+    expect(await c.main({ Type: 'Timer', userId: 'forged' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    expect(c.modelCalls()).toBe(0); expect(c.documents.size).toBe(0);
+    c.context.OPENID = '';
+    expect(await c.main({ action: 'companion.initiative', payload: {} })).toMatchObject({ ok: false, error: { code: 'UNAUTHENTICATED' } });
+  });
   it('accepts wx transport userInfo but binds storage only to trusted WXContext', async () => {
     const c = cloudEntry();
     expect(await c.main({ action: 'session.bootstrap', payload: {}, userInfo: { appId: 'forged', openId: 'forged-user' },

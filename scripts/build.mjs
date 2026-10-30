@@ -33,6 +33,7 @@ if (await stat(cloud).then(() => true, () => false)) {
   await build({ entryPoints: [cloud], outfile: path.join(destination, 'index.js'), bundle: true,
     platform: 'node', format: 'cjs', target: 'node20', external: ['wx-server-sdk', 'tencentcloud-sdk-nodejs-tms'], logLevel: 'info' });
   await cp(path.join(root, 'src/cloud/package.json'), path.join(destination, 'package.json'));
+  await cp(path.join(root, 'src/cloud/api-config.json'), path.join(destination, 'config.json'));
   const cleanup = path.join(root, 'dist/cloudfunctions/assistantCleanup');
   await mkdir(cleanup, { recursive: true });
   await build({ entryPoints: [path.join(root, 'src/cloud/cleanup.ts')], outfile: path.join(cleanup, 'index.js'),

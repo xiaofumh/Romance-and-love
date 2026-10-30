@@ -13,11 +13,28 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
   bottom: '', mode: getMode(), contextRounds: 12, initiativeReason: '', initiativeBusy: false, initiativeNote: '', initiativeWaitMs: -1 },
   alive: true, visible: false, lastActivityAt: 0, initiativeSuppressed: false, initiativeTimer: null as ReturnType<typeof setTimeout> | null,
   initiativeServerDueAt: 0,
+  syncTimer: null as ReturnType<typeof setTimeout> | null, presenceTimer: null as ReturnType<typeof setTimeout> | null,
   loadTask: null as Promise<void> | null, loadKey: '', sessionMode: getMode(),
   onLoad(q: Record<string, string>) { this.sessionMode = q.mode === 'demo' || q.mode === 'cloud' ? q.mode : getMode(); this.setData({ id: q.id ?? '' }); },
-  onShow() { this.alive = true; this.visible = true; this.lastActivityAt = Date.now(); return this.load(); },
-  onHide() { this.visible = false; this.stopInitiative(); },
-  onUnload() { this.alive = false; this.visible = false; this.stopInitiative(); },
+  onShow() { this.alive = true; this.visible = true; this.lastActivityAt = Date.now(); return this.load().finally(() => this.armSync()); },
+  onHide() { this.visible = false; this.stopInitiative(); this.stopSync(); void this.presence(false); },
+  onUnload() { this.alive = false; this.visible = false; this.stopInitiative(); this.stopSync(); void this.presence(false); },
+  stopSync() { if (this.syncTimer) clearTimeout(this.syncTimer); if (this.presenceTimer) clearTimeout(this.presenceTimer); this.syncTimer = null; this.presenceTimer = null; },
+  armSync() {
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    if (!this.alive || !this.visible || this.data.mode !== 'cloud' || !this.data.role?.autonomousEnabled) return;
+    this.syncTimer = setTimeout(async () => { this.syncTimer = null;
+      if (this.visible && !this.data.busy && !this.data.initiativeBusy && !this.data.text.trim() && !this.data.pendingText) await this.load(true);
+      this.armSync();
+    }, 15000);
+  },
+  async presence(composing: boolean) {
+    if (this.presenceTimer) clearTimeout(this.presenceTimer); this.presenceTimer = null;
+    if (!this.data.role?.autonomousEnabled || this.sessionMode !== 'cloud' || getMode() !== this.sessionMode
+      || !this.data.bootstrap?.accepted || !this.data.bootstrap?.settings.historyEnabled) return;
+    try { await call('companion.presence', { conversationId: this.data.id, composing }); } catch { /* Never block a draft or invent a sent status. */ }
+    if (composing && this.visible && this.alive && this.data.text.trim()) this.presenceTimer = setTimeout(() => { void this.presence(true); }, 30000);
+  },
   stopInitiative() { if (this.initiativeTimer) clearTimeout(this.initiativeTimer); this.initiativeTimer = null; },
   armInitiative() {
     this.stopInitiative();
@@ -37,12 +54,12 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
     const mode = getMode(), id = this.data.id;
     try {
       await call('companion.initiative', { conversationId: this.data.id }, uniqueId());
-      if (this.alive && this.visible && id === this.data.id && mode === getMode()) { this.setData({ initiativeNote: '' }); await this.load(); }
+      if (this.alive && this.visible && id === this.data.id && mode === getMode()) { this.initiativeSuppressed = !this.data.role?.autonomousEnabled; this.setData({ initiativeNote: '' }); await this.load(true); }
     } catch(e) { if (this.alive && this.visible && id === this.data.id && mode === getMode()) this.setData({ initiativeNote: e instanceof ClientError && e.code === 'INITIATIVE_REPEATED'
       ? '本次话题与近期回复重复，已跳过，不会自动重试。' : '未确认本次主动接话结果，不会自动重试；重新进入会话可查看，你也可以继续写草稿。' }); }
     finally { if (this.alive) this.setData({ initiativeBusy: false, ...(this.visible ? {} : { initiativeNote: '' }) }); }
   },
-  async load(): Promise<void> {
+  async load(silent: unknown = false): Promise<void> {
     const key = `${getMode()}:${this.data.id}`;
     if (this.loadTask) {
       if (this.loadKey === key) return this.loadTask;
@@ -51,13 +68,13 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
       return this.load();
     }
     this.loadKey = key;
-    const task = this.fetchData(); this.loadTask = task;
+    const task = this.fetchData(silent === true); this.loadTask = task;
     try { await task; } finally { if (this.loadTask === task) this.loadTask = null; }
   },
-  async fetchData(): Promise<void> {
+  async fetchData(silent = false): Promise<void> {
     const mode = getMode(), id = this.data.id;
     this.stopInitiative();
-    this.setData({ loading: true, loadError: '', mode, bootstrap: null });
+    this.setData({ loading: !silent, loadError: '', mode, ...(silent ? {} : { bootstrap: null }) });
     if (mode !== this.sessionMode) {
       this.setData({ loading: false, messages: [], role: null,
         loadError: '运行模式已切换，不能在另一模式打开这条会话。本地与云端记录分别保留，请返回当前模式会话列表。' });
@@ -77,13 +94,15 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
         contextRounds: detail.conversation.contextRounds ?? 12,
         beijingTime: detail.clock?.dateTime ?? '', initiativeReason: detail.initiative?.reason ?? '',
         initiativeWaitMs: detail.initiative?.availableAt ? Math.max(0, detail.initiative.availableAt - (detail.serverTime ?? Date.now())) : -1,
-        contextResetReason: detail.conversation.contextResetReason ?? '', lastJob: detail.jobs.at(-1) ?? null, bottom: `msg-${detail.conversation.messages.at(-1)?.id ?? 'end'}` });
+        contextResetReason: detail.conversation.contextResetReason ?? '', lastJob: detail.jobs.at(-1) ?? null,
+        ...(silent && this.data.messages.at(-1)?.id === detail.conversation.messages.at(-1)?.id ? {} : { bottom: `msg-${detail.conversation.messages.at(-1)?.id ?? 'end'}` }) });
       wx.setNavigationBarTitle({ title: `${detail.role.name} · AI` });
     } catch(e) { if (this.alive && mode === getMode() && id === this.data.id)
       this.setData({ loadError: e instanceof Error ? e.message : '加载失败' }); }
     finally { if (this.alive && mode === getMode() && id === this.data.id) { this.setData({ loading: false }); this.armInitiative(); } }
   },
-  input(e: WechatMiniprogram.Input) { this.lastActivityAt = Date.now(); this.setData({ text: e.detail.value }); this.armInitiative(); },
+  input(e: WechatMiniprogram.Input) { const wasTyping = Boolean(this.data.text.trim()); this.lastActivityAt = Date.now(); this.setData({ text: e.detail.value }); this.armInitiative();
+    if (wasTyping !== Boolean(this.data.text.trim())) void this.presence(Boolean(this.data.text.trim())); },
   agree() { this.setData({ agreed: !this.data.agreed }); },
   agreeSave() { this.setData({ saveAgreed: !this.data.saveAgreed }); },
   legal() { wx.navigateTo({ url: '/pages/legal/index' }); },
@@ -93,7 +112,7 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
     catch(e) { toast(e); }
   },
   async send(replay: unknown = false) {
-    if (this.data.busy || this.data.initiativeBusy || this.data.loading || this.data.loadError) return;
+    if (this.data.busy || (this.data.initiativeBusy && !this.data.role?.autonomousEnabled) || this.data.loading || this.data.loadError) return;
     const retry = replay === true, text = retry ? this.data.pendingText : this.data.text.trim();
     if (!text) return;
     if (!retry && this.data.requestId) return toast(new Error('上一条仍待确认，请先查询原请求；新草稿会保留'));
@@ -107,6 +126,7 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
     // Render the outgoing bubble and release the composer before any network
     // await. The pending bubble is not a server-delivery acknowledgement.
     this.setData({ busy: true, error: '', pendingText: text, requestId, text: retry ? this.data.text : '', lastJob: null, bottom: 'msg-end' });
+    if (this.presenceTimer) clearTimeout(this.presenceTimer); this.presenceTimer = null;
     try {
       const r = await call<{ job: ChatJob }>('companion.send', { conversationId: this.data.id, text }, requestId);
       if (!this.alive || mode !== getMode()) return;
@@ -139,6 +159,12 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
   source(e: WechatMiniprogram.TouchEvent) { wx.navigateTo({ url: `/pages/source/index?id=${encodeURIComponent(e.currentTarget.dataset.id)}` }); },
   copy(e: WechatMiniprogram.TouchEvent) {
     const m = this.data.messages.find(v => v.id === e.currentTarget.dataset.id);
-    if (m) wx.setClipboardData({ data: m.speaker === 'assistant' ? `【AI生成${m.mode === 'demo' ? '·模拟模板' : ''}】\n${m.text}` : m.text });
+    if (!m) return;
+    if (m.speaker === 'assistant') return wx.setClipboardData({ data: `【AI生成${m.mode === 'demo' ? '·模拟模板' : ''}】\n${m.text}` });
+    // 只传来源ID，目标页重新读取原文并核对归属；不把私人正文放进URL。
+    wx.showActionSheet({ itemList: ['复制', '存为候选记忆'], success: r => {
+      if (r.tapIndex === 0) wx.setClipboardData({ data: m.text });
+      else if (r.tapIndex === 1) wx.navigateTo({ url: `/pages/role-memory/index?roleId=${encodeURIComponent(this.data.role!.id)}&conversationId=${encodeURIComponent(this.data.id)}&messageId=${encodeURIComponent(m.id)}` });
+    } });
   },
 });

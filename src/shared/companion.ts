@@ -15,6 +15,7 @@ export const RoleInput = z.object({ id: z.string().min(1).max(100).optional(), v
   userAddress: z.string().trim().max(20).optional(), selfAddress: z.string().trim().max(20).optional(),
   closeness: z.enum(CLOSENESS).optional(), emotion: z.enum(EMOTIONS).optional(), habits: z.string().trim().max(160).optional(),
   proactiveEnabled: z.boolean().optional(), bubbleStyle: z.enum(['single', 'natural']).optional(),
+  autonomousEnabled: z.boolean().optional(),
 }).strict();
 export type CompanionRole = z.infer<typeof RoleInput> & { id: string; version: number; createdAt: number };
 export function rolePreferences(role: Partial<CompanionRole>) {
@@ -27,7 +28,8 @@ export type ChatMessage = { id: string; requestId: string; speaker: 'user' | 'as
 export type Conversation = { id: string; roleId: string; title: string; messages: ChatMessage[]; createdAt: number; updatedAt: number;
   primary?: boolean;
   contextAfterId?: string; contextResetReason?: string; contextRounds?: 6 | 12; settingsVersion?: number;
-  interaction?: { mode: InteractionMode; initiativeAttemptFor?: string; lastInitiativeAt?: number; recentTopics?: string[] } };
+  interaction?: { mode: InteractionMode; initiativeAttemptFor?: string; lastInitiativeAt?: number; recentTopics?: string[];
+    autonomousCycle?: { requestId: string; attempts: number }; composingUntil?: number; backgroundRetryAfter?: number } };
 // Presentation-only compatibility: do not rewrite stored historical messages or strip real/user text.
 export function displayChatText(message: Pick<ChatMessage, 'speaker' | 'mode' | 'text'>): string {
   return message.speaker === 'assistant' && message.mode === 'demo'
@@ -47,9 +49,21 @@ export function referenceQuality(turns: ReferenceTurn[]) {
   }
   return { userCount, referenceCount, duplicateCount };
 }
+// Source pointers are resolved on the server. Never accept client-provided
+// quotes, speakers or timestamps as evidence; model replies are not evidence.
+export type MemorySource = { kind: 'manual' | 'message' | 'document'; recordedAt: number; occurredAt?: number;
+  conversationId?: string; messageId?: string; documentId?: string; turn?: number; speaker?: 'user' | 'reference' };
+export const MEMORY_KINDS = [{ value: 'fact', label: '一般事实' }, { value: 'preference', label: '偏好与习惯' },
+  { value: 'event', label: '阶段事件' }, { value: 'boundary', label: '称呼与明确边界' }, { value: 'setting', label: '角色虚构设定' }] as const;
+export type MemoryKind = typeof MEMORY_KINDS[number]['value'];
+export type MemorySelectionEntry = { id: string; version: number; selected: boolean;
+  reason: 'selected' | 'background' | 'pending' | 'expired' | 'conflict' | 'duplicate' | 'unrelated' | 'limit' | 'disabled';
+  score?: number; relevance?: number; recency?: number; importance?: number; evidence?: number };
+export type MemorySelection = { policy: 'external-memory-v1'; entries: MemorySelectionEntry[] };
 export type CompanionMemory = { id: string; roleId: string; text: string; status: 'pending' | 'confirmed'; version: number;
   documentId?: string; createdAt: number; subject?: 'user' | 'role' | 'reference' | 'unspecified'; topic?: string;
-  sourceNote?: string; validFor?: 'long-term' | 'today' | '7days'; expiresAt?: number; expiryHandled?: boolean };
+  sourceNote?: string; validFor?: 'long-term' | 'today' | '7days'; expiresAt?: number; expiryHandled?: boolean;
+  kind?: MemoryKind; importance?: number; updatedAt?: number; confirmedAt?: number; sources?: MemorySource[] };
 export const MEMORY_SUBJECTS = [{ value: 'unspecified', label: '未明确主体' }, { value: 'user', label: '我的事实' },
   { value: 'role', label: 'AI角色虚构设定' }, { value: 'reference', label: '历史参考人物' }] as const;
 export const MEMORY_DURATIONS = [{ value: 'long-term', label: '长期（可手动纠正／删除）' },
@@ -58,7 +72,12 @@ export const MemoryInput = z.object({ id: z.string().min(1).max(100).optional(),
   roleId: z.string().min(1).max(100), text: z.string().trim().min(1).max(100), confirmed: z.boolean(),
   documentId: z.string().min(1).max(100).optional(), subject: z.enum(['user', 'role', 'reference', 'unspecified']).optional(),
   topic: z.string().trim().max(30).optional(), sourceNote: z.string().trim().max(80).optional(),
-  validFor: z.enum(['long-term', 'today', '7days']).optional() }).strict();
+  validFor: z.enum(['long-term', 'today', '7days']).optional(),
+  kind: z.enum(['fact', 'preference', 'event', 'boundary', 'setting']).optional(), importance: z.number().int().min(1).max(5).optional(),
+  source: z.union([
+    z.object({ kind: z.literal('message'), conversationId: z.string().min(1).max(100), messageId: z.string().min(1).max(100) }).strict(),
+    z.object({ kind: z.literal('document'), documentId: z.string().min(1).max(100), turn: z.number().int().positive() }).strict(),
+  ]).optional() }).strict();
 export function memoryActive(memory: CompanionMemory, now: number): boolean {
   return memory.status === 'confirmed' && (memory.expiresAt == null || memory.expiresAt > now);
 }
@@ -72,6 +91,7 @@ export type ChatJob = { id: string; conversationId: string; roleId: string; hash
   status: 'PROCESSING' | 'SUCCEEDED' | 'SKIPPED' | 'FAILED' | 'CANCELLED' | 'TIMED_OUT'; createdAt: number; leaseUntil: number;
   errorCode?: string; day: string; kind?: 'reply' | 'initiative';
   metrics?: { contextRounds: 6 | 12; historyMessages: number; elapsedMs: number; inputTokens?: number; outputTokens?: number;
+    memorySelection?: MemorySelection;
     failureStage?: string; failureKind?: string;
     requestAudit?: { historySha256: string; historyMessages: number; protocol: string; chatTemperature?: number } } };
 export type CompanionState = { roles: CompanionRole[]; conversations: Conversation[]; documents: ReferenceDocument[];

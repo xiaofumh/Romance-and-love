@@ -17,7 +17,7 @@ function mini(cloudData?: (request: any) => unknown, file?: { size: number; text
   image?: { width: number; height: number; tiles: string[] }) {
   const storage = new Map<string, unknown>(); const clipboards: string[] = []; const toasts: string[] = [];
   const cloudRequests: any[] = [];
-  const modals: any[] = [];
+  const modals: any[] = [], actionSheets: any[] = [];
   const events: any[] = [], navigations: any[] = []; let canvasTile = -1;
   const canvas = { width: 1, height: 1, createImage: () => ({ onload: () => {}, set src(_value: string) { this.onload(); } }),
     getContext: () => ({ fillStyle: '', fillRect: () => {}, drawImage: () => { canvasTile++; } }),
@@ -31,7 +31,7 @@ function mini(cloudData?: (request: any) => unknown, file?: { size: number; text
     chooseMedia: (p: any) => image ? p.success({ tempFiles: [{ size: 100, tempFilePath: '/mock/screenshot.jpg' }] }) : p.fail(),
     getImageInfo: (p: any) => p.success({ width: image?.width, height: image?.height }), previewImage: () => {},
     createSelectorQuery: () => ({ in() { return this; }, select() { return this; }, fields() { return this; }, exec(cb: any) { cb([{ node: canvas }]); } }),
-    setNavigationBarTitle: () => undefined, showModal: (p: any) => { modals.push(p); }, showActionSheet: () => undefined,
+    setNavigationBarTitle: () => undefined, showModal: (p: any) => { modals.push(p); }, showActionSheet: (p: any) => { actionSheets.push(p); },
     chooseMessageFile: (options: any) => file ? options.success({ tempFiles: [{ size: file.size, path: '/mock/synthetic.txt', name: 'synthetic.txt' }] }) : options.fail(),
     getFileSystemManager: () => ({ readFile: (options: any) => { fileReads++; options.success({ data: file?.text ?? '' }); } }),
     cloud: { callFunction: async (request: any) => {
@@ -57,9 +57,58 @@ function mini(cloudData?: (request: any) => unknown, file?: { size: number; text
     options.getOpenerEventChannel = () => ({ once: () => {}, emit: (name: string, data: unknown) => events.push({ name, data }) });
     return options;
   }
-  return { api, page, clipboards, toasts, storage, cloudRequests, events, navigations, modals, fileReads: () => fileReads };
+  return { api, page, clipboards, toasts, storage, cloudRequests, events, navigations, modals, actionSheets, fileReads: () => fileReads };
 }
 describe('native mini-program page workflows (wx mocked)', () => {
+  it('offers a sourced candidate from a user bubble without putting private text into navigation URLs or accepting AI output as evidence', () => {
+    const m = mini(), p = m.page('chat');
+    p.setData({ id: 'chat-id', role: { id: 'role-id' }, messages: [{ id: 'user-id', speaker: 'user', text: '私密测试原文' }, { id: 'assistant-id', speaker: 'assistant', text: 'AI回答' }] });
+    p.copy({ currentTarget: { dataset: { id: 'user-id' } } }); expect(m.actionSheets).toHaveLength(1);
+    m.actionSheets[0].success({ tapIndex: 1 });
+    expect(m.navigations[0].url).toContain('messageId=user-id'); expect(m.navigations[0].url).not.toContain('私密测试原文');
+    p.copy({ currentTarget: { dataset: { id: 'assistant-id' } } }); expect(m.actionSheets).toHaveLength(1); expect(m.clipboards[0]).toContain('AI回答');
+  });
+  it('previews memory selection without a model call, preserves type/importance on edit, and does not auto-confirm', async () => {
+    const m = mini(); await m.api.call('consent.update', { version: POLICY_VERSION, accepted: true }); await m.api.call('settings.update', { memoryEnabled: true });
+    const role = await m.api.call('companion.role.save', { name: '测试角色', relationship: 'friend', personality: '温柔倾听', description: '', boundaries: '' });
+    const p = m.page('role-memory'); p.onLoad({ roleId: role.id }); p.input({ detail: { value: '我喜欢乌龙茶' } });
+    p.pickKind({ detail: { value: '1' } }); p.pickImportance({ detail: { value: '4' } }); await p.save();
+    expect(p.data.items[0]).toMatchObject({ kind: 'preference', importance: 5, status: 'pending' });
+    p.edit({ currentTarget: { dataset: { id: p.data.items[0].id } } }); expect(p.data.kindIndex).toBe(1); expect(p.data.importanceIndex).toBe(4);
+    p.input({ currentTarget: { dataset: { field: 'query' } }, detail: { value: '乌龙茶' } }); await p.inspect();
+    expect(p.data.inspection[0]).toMatchObject({ selected: false, reason: '尚未确认' }); expect(m.modals).toHaveLength(0);
+    expect(m.cloudRequests).toEqual([]);
+  });
+  it('hides the clock and normal waiting notices while keeping uncertain-result recovery', () => {
+    const view = readFileSync('src/miniprogram/pages/chat/index.wxml', 'utf8');
+    expect(view).not.toMatch(/服务器最近同步|本机演示时间|等待AI回复|回复中/);
+    expect(view).toContain('回复状态待确认'); expect(view).toContain('查询原请求'); expect(view).toContain('AI');
+  });
+  it('keeps the list visible on slow/failing refresh and reuses a fresh tab without another network request', async () => {
+    let fail = false, rejectRefresh!: (e: Error) => void;
+    const rows = { roles: [{ id: 'r', name: '合成角色' }], conversations: [{ id: 'c', roleId: 'r', title: '', preview: '合成摘要', updatedAt: 1 }] };
+    const m = mini(r => r.data.action === 'session.bootstrap' ? fail ? new Promise((_resolve, reject) => { rejectRefresh = reject; }) : cloudBoot : rows);
+    m.api.setMode('cloud'); const p = m.page('chats'); await p.onShow(); const initialCalls = m.cloudRequests.length;
+    await p.onShow(); expect(m.cloudRequests).toHaveLength(initialCalls);
+    fail = true; const task = p.load(); expect(p.data.items).toHaveLength(1); expect(p.data.hasLoaded).toBe(true);
+    rejectRefresh(new Error('网络中断')); await task;
+    expect(p.data.items[0].id).toBe('c'); expect(p.data.error).not.toBe('');
+  });
+  it('clears invalidated/deleted cache immediately and rejects an old in-flight result after mode change', async () => {
+    let removed = false, slow = false, release!: (v: unknown) => void;
+    const rows = { roles: [{ id: 'r', name: '合成角色' }], conversations: [{ id: 'c', roleId: 'r', title: '', preview: '合成摘要', updatedAt: 1 }] };
+    const m = mini(r => {
+      if (r.data.action === 'companion.delete') { removed = true; return {}; }
+      if (r.data.action === 'session.bootstrap') return slow ? new Promise(resolve => { release = resolve; }) : cloudBoot;
+      return removed ? { roles: [], conversations: [] } : rows;
+    });
+    m.api.setMode('cloud'); const p = m.page('chats'); await p.onShow();
+    await m.api.call('companion.delete', { kind: 'conversation', id: 'c' });
+    const refresh = p.onShow(); expect(p.data.items).toEqual([]); await refresh; expect(p.data.items).toEqual([]);
+    removed = false; await p.load(); expect(p.data.items).toHaveLength(1);
+    slow = true; const old = p.load(); m.api.setMode('demo'); const changed = p.onShow(); expect(p.data.items).toEqual([]);
+    release(cloudBoot); await Promise.all([old, changed]); expect(p.data.mode).toBe('demo'); expect(p.data.items).toEqual([]);
+  });
   it('shows the outgoing bubble and clears the composer before the model finishes, preserving the next draft', async () => {
     let finish!: (v: unknown) => void;
     const m = mini(r => r.data.action === 'session.bootstrap' ? cloudBoot : r.data.action === 'companion.send'

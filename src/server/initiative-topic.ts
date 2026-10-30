@@ -2,13 +2,19 @@ import type { ChatContext } from './companion-prompt';
 import { buildDialoguePlan, eligibleThread } from './dialogue';
 export const INITIATIVE_WAIT = '[[WAIT]]';
 export type InitiativeTopic = { key: string; kind: 'follow-up' | 'fresh'; instruction: string; anchor?: string };
-export function chooseInitiativeTopic(c: Pick<ChatContext, 'messages' | 'interaction'>, recentTopics: string[], hash: (s: string) => string, now = Date.now()): InitiativeTopic | undefined {
+export function chooseInitiativeTopic(c: Pick<ChatContext, 'messages' | 'interaction'>, recentTopics: string[], hash: (s: string) => string, now = Date.now(), autonomous = false): InitiativeTopic | undefined {
   if (c.interaction === 'quiet') return;
   const latest = [...c.messages].reverse().find(m => m.speaker === 'user');
   if (!latest?.createdAt || latest.createdAt <= now - 24 * 3600000 || latest.createdAt > now) return;
   const lastAssistant = [...c.messages].reverse().find(m => m.speaker === 'assistant');
-  if (lastAssistant && /[？?]/.test(lastAssistant.text)) return;
+  if (!autonomous && lastAssistant && /[？?]/.test(lastAssistant.text)) return;
   const plan = buildDialoguePlan({ ...c, message: '' }, now), anchor = eligibleThread(plan);
+  if (autonomous) {
+    if (plan.ledger.declinedTopics.length && !anchor) return;
+    if (/^(?:晚安|再见|不聊了|先不聊了|我先忙|先不说了|不想聊|不想说)/.test(latest.text.trim())) return;
+    return { key: `auto:${hash(latest.text)}:${recentTopics.length}`, kind: anchor ? 'follow-up' : 'fresh', anchor: anchor?.text ?? latest.text,
+      instruction: '这是用户允许的持续主动聊天。结合人格、称呼、当前会话与已确认记忆，自行判断此刻是否有自然的新内容，可以短短接几句或换个轻量角度；不要重复已有问题、催促回复、推断用户心情或虚构线下行动。不要每次都提问，不用依赖、生死、内疚或充值压力。没有合适内容、用户想留白时仅输出[[WAIT]]。' };
+  }
   if (!anchor) return;
   const followKey = `thread:${hash(normalize(anchor.text))}`;
   if (recentTopics.includes(followKey)) return;

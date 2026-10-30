@@ -2,6 +2,7 @@ import { freshState, maintain } from '../server/state';
 import type { StateRepository, UserState, CallBudget } from '../server/state';
 import { STORAGE_LIMITS } from '../shared/limits';
 import { AppError, databaseError } from '../server/errors';
+import { nextAutonomousWake } from '../server/autonomy';
 
 // Minimal SDK surface; checked with a contract fake and requires live CloudBase validation before release.
 export type Db = { runTransaction<T>(fn: (transaction: Transaction) => Promise<T>): Promise<T> };
@@ -23,7 +24,7 @@ export function cloudRepository(db: Db, options: { touchUnchanged?: boolean } = 
     try { return await db.runTransaction(async transaction => {
       logicFailed = false;
       const doc = transaction.collection('assistant_users').doc(uid);
-      const stored = await read<{ state: UserState }>(doc);
+      const stored = await read<{ state: UserState; initiativeDueAt?: number }>(doc);
       const before = stored?.state == null ? undefined : JSON.stringify(stored.state);
       const state = stored?.state ?? freshState(uid, now);
       let result: T, encoded: string;
@@ -35,8 +36,9 @@ export function cloudRepository(db: Db, options: { touchUnchanged?: boolean } = 
       // Observational polls must not rewrite the same large user document.
       // Maintenance and actual mutations still commit atomically. Cleanup opts
       // into touching scan timestamps so an unchanged first page cannot starve it.
-      if (options.touchUnchanged || before !== encoded)
-        await doc.set({ data: { state: JSON.parse(encoded), updatedAt: now } });
+      const initiativeDueAt = nextAutonomousWake(state, now);
+      if (options.touchUnchanged || before !== encoded || stored?.initiativeDueAt !== initiativeDueAt)
+        await doc.set({ data: { state: JSON.parse(encoded), updatedAt: now, initiativeDueAt } });
       return result;
     }); } catch (error) { if (logicFailed && error === logicError) throw error; throw databaseError(error); }
   } };
