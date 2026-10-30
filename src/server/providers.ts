@@ -22,6 +22,15 @@ function companionOutput(content: string) {
 
 export type ModelConfig = { url: string; apiKey: string; model: string; name: string; timeoutMs: number; jsonMode: boolean;
   thinking?: 'disabled' | 'enabled' };
+function transportFailure(error: unknown): AppError {
+  // Fetch can fail either before headers or while reading a successful response.
+  // Only inspect the standard error name; provider text/URLs/credentials never
+  // belong in the client-facing message or the error's serialised properties.
+  const name = error !== null && typeof error === 'object' ? (error as { name?: unknown }).name : undefined;
+  return name === 'TimeoutError' || name === 'AbortError'
+    ? new AppError('PROVIDER_TIMEOUT', '模型响应超时，请勿重复提交原请求', true)
+    : new AppError('PROVIDER_UNAVAILABLE', '模型连接中断，本次不扣体验额度', true);
+}
 export function createHttpProvider(config: ModelConfig, transport: typeof fetch = fetch): Provider {
   async function request(context: ProviderContext | ChatContext, chat: boolean) {
     const url = new URL(config.url);
@@ -41,23 +50,37 @@ export function createHttpProvider(config: ModelConfig, transport: typeof fetch 
           ...(config.thinking ? { thinking: { type: config.thinking } } : {}) }),
         signal: AbortSignal.timeout(config.timeoutMs) });
     } catch (error) {
-      if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name))
-        throw new AppError('PROVIDER_TIMEOUT', '模型响应超时，请勿重复提交原请求', true);
-      throw new AppError('PROVIDER_UNAVAILABLE', '模型连接失败，本次不扣体验额度', true);
+      throw transportFailure(error);
     }
     if (!response.ok) throw new AppError('PROVIDER_UNAVAILABLE', `模型服务暂不可用（${response.status}），本次不扣体验额度`, true);
     // Bound response text even if a misconfigured provider sends excessive output.
-    const reader = response.body?.getReader(); let text = '';
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    try { reader = response.body?.getReader(); }
+    catch (error) { throw transportFailure(error); }
+    let text = '';
     if (!reader) throw new AppError('INVALID_MODEL_OUTPUT', '模型响应为空', true);
     try {
       const decoder = new TextDecoder(); let count = 0;
       while (true) {
         const item = await reader.read(); if (item.done) break;
         count += item.value.byteLength;
-        if (count > 100000) { await reader.cancel(); throw new AppError('INVALID_MODEL_OUTPUT', '模型响应过长', true); }
+        if (count > 100000) {
+          // An oversized response remains a format/size failure even if cancelling
+          // its underlying stream also fails during cleanup.
+          try { await reader.cancel(); } catch {}
+          throw new AppError('INVALID_MODEL_OUTPUT', '模型响应过长', true);
+        }
         text += decoder.decode(item.value, { stream: true });
       }
       text += decoder.decode();
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw transportFailure(error);
+    } finally {
+      // Cleanup must not mask the classified read/timeout error.
+      try { reader.releaseLock(); } catch {}
+    }
+    try {
       const data = JSON.parse(text) as { choices?: { finish_reason?: string; message?: { content?: string } }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number } };
       const choice = data.choices?.[0];
@@ -69,7 +92,7 @@ export function createHttpProvider(config: ModelConfig, transport: typeof fetch 
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw new AppError('INVALID_MODEL_OUTPUT', '模型响应格式异常，本次不扣体验额度', true);
-    } finally { reader.releaseLock(); }
+    }
   }
   return { name: config.name, generate: c => request(c, false), chat: c => request(c, true) };
 }

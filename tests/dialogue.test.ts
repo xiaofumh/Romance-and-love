@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDialoguePlan, TOPIC_TTL_MS } from '../src/server/dialogue';
+import { buildDialoguePlan, declinedIn, isControlOnly, TOPIC_TTL_MS } from '../src/server/dialogue';
 import { chooseInitiativeTopic } from '../src/server/initiative-topic';
 import { nextInteractionMode, selectContext } from '../src/shared/interaction';
 import type { ChatContext } from '../src/server/companion-prompt';
@@ -66,5 +66,47 @@ describe('bounded sourced dialogue planning', () => {
     expect(nextInteractionMode('好了继续聊', 'quiet')).toBe('listening');
     expect(nextInteractionMode('好了先不聊了')).toBe('quiet');
     expect(nextInteractionMode('“继续聊”是什么意思', 'quiet')).toBe('quiet');
+  });
+  it('treats a no-question request as a question constraint rather than a forbidden pronoun topic', () => {
+    for (const text of ['别问我了', '不要再问我了', '别问我们了']) {
+      const p = plan([], text);
+      expect(p.ledger.declinedTopics).toEqual([]);
+      expect(p.questionAllowance).toBe('none');
+      expect(nextInteractionMode(text)).toBe('listening');
+      const later = plan([u(text), u('我今天想聊聊一部新电影')]);
+      expect(later.ledger.current?.text).toBe('我今天想聊聊一部新电影');
+      expect(choose([u(text), u('我今天想聊聊一部新电影')])?.anchor).toBe('我今天想聊聊一部新电影');
+    }
+    expect(declinedIn('别问我的工作了')).toEqual(['工作']);
+  });
+  it('applies topic permissions in their actual clause order inside one message', () => {
+    const reopen = '先别聊工作了，现在可以聊工作了';
+    const refuse = '现在可以聊工作了，先别聊工作了';
+    expect(declinedIn(reopen)).toEqual([]);
+    expect(plan([u('今天工作里遇到一件事情')], reopen).ledger.declinedTopics).toEqual([]);
+    expect(declinedIn(refuse)).toEqual(['工作']);
+    const p = plan([u('今天工作里遇到一件事情')], refuse);
+    expect(p.ledger.declinedTopics).toEqual([{ topic: '工作', sourceIndex: 1 }]);
+    expect(p.ledger.openThreads).toEqual([]);
+  });
+  it('does not execute reported clauses continued after a comma, including their first-person wording', () => {
+    for (const text of ['他对我说，先不聊了', '她说，别聊工作了', '她说，我先去忙了', '他告诉我，我今天不想聊了']) {
+      expect(nextInteractionMode(text)).toBe('listening');
+      expect(plan([u(text)]).ledger.declinedTopics).toEqual([]);
+    }
+    expect(plan([u('她说，别聊工作了，不过我现在可以聊工作了')]).ledger.declinedTopics).toEqual([]);
+    expect(nextInteractionMode('他对我说，先不聊了，不过我又想聊了', 'quiet')).toBe('listening');
+    expect(nextInteractionMode('他对我说，先不聊了。我先去忙了')).toBe('quiet');
+  });
+  it('shares continuation command recognition with proactive source eligibility', () => {
+    const subject = '我今天想聊聊正在布置的虚构小花园';
+    for (const text of ['好了继续聊', '好了，继续聊', '我又想聊了', '好了，继续聊吧']) {
+      expect(nextInteractionMode(text, 'quiet')).toBe('listening');
+      expect(isControlOnly(text)).toBe(true);
+      const messages = [u(subject), a('花园听起来很有意思。'), u('先不聊了'), u(text)];
+      expect(choose(messages)?.anchor).toBe(subject);
+    }
+    expect(isControlOnly('好了，继续聊，我今天看完一部新电影')).toBe(false);
+    expect(choose([u(subject), u('我又想聊了'), u('嗯')])).toBeUndefined();
   });
 });

@@ -3,7 +3,7 @@ import { ChatOutput, ImportInput, RoleInput, MemoryInput, CONTEXT_LIMITS, DEFAUL
 import type { CompanionState, CompanionMemory, Conversation, ReferenceDocument, ChatJob } from '../shared/companion';
 import { POLICY_VERSION } from '../shared/contracts';
 import type { Envelope } from '../shared/contracts';
-import { AppError, fail } from './errors';
+import { AppError, DatabaseError, fail } from './errors';
 import { cancelPending, dateKey, resetRoleContext } from './state';
 import type { UserState } from './state';
 import type { ServiceOptions } from './service';
@@ -176,16 +176,21 @@ export function createCompanion(o: ServiceOptions) {
       });
     } catch (error) {
       if (timer) clearTimeout(timer); stopped = true;
-      await tx(uid, (_s, c) => { const job = c.jobs.find(j => j.id === id); if (job?.status === 'PROCESSING') {
+      const kind = (e: unknown) => e instanceof DatabaseError ? e.kind : e instanceof AppError ? 'controlled'
+        : e instanceof TypeError ? 'TypeError' : e instanceof ReferenceError ? 'ReferenceError' : 'unknown';
+      try { await tx(uid, (_s, c) => { const job = c.jobs.find(j => j.id === id); if (job?.status === 'PROCESSING') {
         timing(job);
         if (job.metrics) {
           job.metrics.failureStage = phase;
-          job.metrics.failureKind = error instanceof AppError ? 'controlled'
-            : error instanceof TypeError ? 'TypeError' : error instanceof ReferenceError ? 'ReferenceError' : 'unknown';
+          job.metrics.failureKind = kind(error);
         }
         job.status = error instanceof AppError && error.code === 'PROVIDER_TIMEOUT' ? 'TIMED_OUT' : 'FAILED';
         job.errorCode = error instanceof AppError ? error.code : 'SERVICE_UNAVAILABLE';
-      } });
+      } }); } catch (persistenceError) {
+        // A second DB outage must not replace the original model/save failure.
+        // Leave the idempotent lease intact; never repeat a paid model request.
+        try { o.onInternalError?.({ kind: 'chat-failure-persist', phase, primaryKind: kind(error), persistenceKind: kind(persistenceError) }); } catch { /* diagnostics cannot change the API result */ }
+      }
       if (error instanceof AppError) throw error;
       fail('SERVICE_UNAVAILABLE', '模型服务暂时不可用，本次不扣体验额度', true);
     }

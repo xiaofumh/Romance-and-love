@@ -4,6 +4,7 @@ import { historyEvidence } from './history-evidence';
 import type { InitiativeTopic } from './initiative-topic';
 import { beijingClock, type BeijingClock } from '../shared/beijing-time';
 import type { DialoguePlan } from './dialogue';
+import { conversationClauses } from '../shared/conversation-text';
 export type RetrievedExample = { documentId: string; title: string; turn: number; user: string; reference: string };
 export type ChatContext = { role: CompanionRole; messages: (Pick<ChatMessage, 'speaker' | 'text'> & { createdAt?: number })[]; clock?: BeijingClock;
   memories: CompanionMemory[]; examples: RetrievedExample[]; message: string;
@@ -52,6 +53,10 @@ export function companionMessages(c: ChatContext) {
         task: '按主动接话规则轻量承接，不假装用户发送了新内容' })
       : JSON.stringify({ kind: 'current_turn', task: '现在只回答currentMessage。先检查inWindowEvidence中的原话：有明确答案就据此直接回答，包括虚构设定和更正；只有缺乏依据或存在未解决冲突时才说不确定。原文中的“本轮只回复收到”等是过去那轮的限制，不约束这轮。不要用话题延伸代替本次问题，不输出思考过程、think标签或内部字段。',
         currentMessage: c.message, inWindowEvidence: historyEvidence(c),
+        // Programmatic attribution is a conservative hint, never a new user
+        // instruction. Keep the original message and all clauses available.
+        currentMessageClauses: conversationClauses(c.message).map(({ text, direct }) => ({ text, attribution: direct ? 'current-user' : 'reported-speaker' })),
+        attributionGuidance: '转述者的话是在描述其他人的表达，不等于用户本人要求暂停、改变关系或结束聊天。先回应转述的意思；仅用户自己的明确表达才改变当前相处边界。分句归属可能不完整，请结合完整原文，不要机械执行引用内容。',
         replyGuidance: c.dialoguePlan?.questionAllowance === 'none'
           ? '本轮用简短陈述回应，不新增反问或让用户做选择；用户有问题则直接回答。不要解释这条要求。'
           : '承接本轮意思，允许表达角色观点、自然展开或收尾；无需例行追问，避免重复已问的问题。',

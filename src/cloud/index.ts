@@ -5,6 +5,7 @@ import { modelConfigFromEnv } from '../server/model-config';
 import { cloudBudget, cloudRepository } from './repository';
 import { createContentReview } from './content-review';
 import { createScreenshotProvider } from '../server/screenshot-provider';
+import { safeDiagnostic } from './diagnostics';
 
 // External SDKs are installed by CloudBase from the cloud function's package.json.
 const cloud = require('wx-server-sdk');
@@ -33,6 +34,7 @@ function getService() {
     internalTestChatDailyLimit: integer(env.INTERNAL_TEST_CHAT_DAILY_LIMIT, 1000, 1, 1000),
     operator: env.OPERATOR_NAME ?? '待填写实际运营主体', support: env.SUPPORT_CONTACT ?? '待填写投诉联系渠道',
     moderator: review.moderator, contentReview: review.status, assertGenerationAccess: review.assertGenerationAccess,
+    onInternalError: error => console.error('assistant_internal_error', JSON.stringify(safeDiagnostic(error))),
   });
   return service;
 }

@@ -1,7 +1,7 @@
 {
   "appid": "wxcf99a03236cc4eca",
   "projectname": "tale",
-  "description": "相伴AI聊天V0.5.0；默认12轮与自然接话",
+  "description": "相伴AI聊天V0.5.1；默认12轮与可靠对话保存",
   "compileType": "miniprogram",
   "miniprogramRoot": "dist/miniprogram/",
   "cloudfunctionRoot": "dist/cloudfunctions/",

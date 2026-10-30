@@ -1,8 +1,8 @@
 {
   "name": "ai-communication-assistant",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
-  "description": "相伴AI聊天V0.5.0：默认12轮、自然话题延伸与可等待的主动接话",
+  "description": "相伴AI聊天V0.5.1：并发保存诊断、隐式纠错与对话边界修复",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",

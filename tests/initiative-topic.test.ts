@@ -12,10 +12,11 @@ describe('explicit interaction choices and bounded topic planning (no model)', (
     expect(nextInteractionMode('先听我说', 'light')).toBe('listening');
   });
   it('does not let quotations, third parties, or a specific rejected topic control the state', () => {
-    for (const t of ['朋友说晚安', '她说：不想聊了', '“不想聊了”怎么回复', '晚安是什么意思', '不想聊工作'])
+    for (const t of ['朋友说晚安', '她说：不想聊了', '她说，先不聊了', '他对我说，我先睡了', '“不想聊了”怎么回复', '晚安是什么意思', '不想聊工作'])
       expect(nextInteractionMode(t)).toBe('listening');
     expect(nextInteractionMode('你好，我先睡了')).toBe('quiet');
     expect(nextInteractionMode('晚安，我现在又想聊了')).toBe('listening');
+    for (const t of ['先不说了', '不聊了']) expect(nextInteractionMode(t)).toBe('quiet');
   });
   it('uses a fresh sourced thread once and waits instead of rotating generic topics', () => {
     const now = Date.now();

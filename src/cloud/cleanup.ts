@@ -10,7 +10,7 @@ export async function main(event: unknown) {
   const rows = await db.collection('assistant_users').where({ updatedAt: db.command.lt(stamp - 15 * 60000) })
     .orderBy('updatedAt', 'asc').limit(50).get();
   let processed = 0;
-  const repo = cloudRepository(db);
+  const repo = cloudRepository(db, { touchUnchanged: true });
   for (const record of rows.data) {
     await repo.transact(record._id, stamp, () => ({ cleaned: true })); processed++;
   }

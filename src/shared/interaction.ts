@@ -1,19 +1,14 @@
 import type { ChatMessage, CompanionRole, Conversation, InteractionMode } from './companion';
+import { conversationClauses, interactionCommand } from './conversation-text';
 export const INITIATIVE_LIMITS = { idleMs: 45000, cooldownMs: 300000 } as const;
 export const INTERACTION_LABELS = { listening: '倾听陪伴', light: '轻松聊聊', quiet: '暂停主动' } as const;
 export function nextInteractionMode(text: string, previous: InteractionMode = 'listening'): InteractionMode {
   // Explicit first-person/current-chat choices only. Quoted/third-party statements
   // must not control this conversation. Unrecognised text preserves the choice.
-  const plain = text.replace(/“[^”]*”|「[^」]*」|『[^』]*』|"[^"\n]*"/g, '');
   let mode = previous;
-  for (const clause of plain.split(/[，,。；;！!\n]/)) {
-    const t = clause.trim().replace(/[～~\s]+$/g, '').replace(/^(?:好了|那就)\s*/, '');
-    if (/^(?:请|你)?(?:先)?(?:别主动|不要主动|别催|不用回)/.test(t)
-      || /^(?:我)?(?:现在|今天|暂时)?(?:先)?(?:不想聊(?:天|了)?|不想说(?:话|了)?|想静静|想安静一会)(?:了|啦|吧)?$/.test(t)
-      || /^(?:晚安|再见|先这样|我先睡了|我先去忙了|我先忙|先不聊了|别追问|不要追问|别再问了|晚点聊|明天再聊)(?:啦|了|吧)?$/.test(t)) mode = 'quiet';
-    else if (/^(?:我们)?(?:换个话题|聊点轻松|讲个笑话|一起玩)(?:吧|点的|的)?$/.test(t)) mode = 'light';
-    else if (/^(?:我)?(?:现在|又|现在又)?(?:想聊了|可以主动找我了|恢复主动接话|继续聊吧|继续聊)$/.test(t)
-      || /^(?:认真聊聊|听我说|先听我说|恢复倾听陪伴)$/.test(t)) mode = 'listening';
+  for (const clause of conversationClauses(text)) {
+    if (!clause.direct) continue;
+    mode = interactionCommand(clause.plain) ?? mode;
   }
   return mode;
 }
