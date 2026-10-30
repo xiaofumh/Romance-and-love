@@ -42,7 +42,7 @@ describe('companion scope, context and retrieval', () => {
     const h = harness(); await h.prepare(); const r = await h.role(), c = await h.conversation('A', r.id);
     await h.repo.transact('A', Date.parse('2026-10-18T00:00:00Z'), s => {
       delete s.companion!.conversations[0]!.primary;
-      s.companion!.conversations.push({ ...c, primary: false, id: 'legacy-content', updatedAt: c.updatedAt - 1,
+      s.companion!.conversations.push({ ...c, primary: undefined, id: 'legacy-content', updatedAt: c.updatedAt - 1,
         messages: [{ id: 'old-m', requestId: 'old-r', speaker: 'user', text: '旧记录合成样本', createdAt: c.createdAt }] });
     });
     const listed = await h.api('A', 'companion.list'); expect(listed.conversations.map((v: any) => v.id)).toEqual(['legacy-content']);
@@ -52,6 +52,9 @@ describe('companion scope, context and retrieval', () => {
     await h.api('A', 'companion.conversation.fork', { id: 'legacy-content', contextRounds: 6 });
     expect((await h.conversation('A', r.id)).id).toBe('legacy-content');
     expect((await h.api('A', 'companion.list')).conversations).toHaveLength(1);
+    await h.api('A', 'companion.delete', { kind: 'conversation', id: 'legacy-content' });
+    const fresh = await h.conversation('A', r.id);
+    expect(fresh.id).not.toBe(c.id); expect(fresh.messages).toEqual([]);
   });
   it('rejects missing consent and client supplied identity', async () => {
     const h = harness(); expect(await h.raw('A', 'companion.role.save', {})).toMatchObject({ ok: false, error: { code: 'CONSENT_REQUIRED' } });
