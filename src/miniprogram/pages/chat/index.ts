@@ -92,22 +92,26 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
     try { await call('consent.update', { version: POLICY_VERSION, accepted: true }); await call('settings.update', { historyEnabled: true }); await this.load(); }
     catch(e) { toast(e); }
   },
-  async send() {
-    if (this.data.busy || this.data.initiativeBusy || this.data.loading || this.data.loadError || !this.data.text.trim()) return;
+  async send(replay: unknown = false) {
+    if (this.data.busy || this.data.initiativeBusy || this.data.loading || this.data.loadError) return;
+    const retry = replay === true, text = retry ? this.data.pendingText : this.data.text.trim();
+    if (!text) return;
+    if (!retry && this.data.requestId) return toast(new Error('上一条仍待确认，请先查询原请求；新草稿会保留'));
     this.stopInitiative(); this.lastActivityAt = Date.now(); this.setData({ initiativeNote: '' });
     if (getMode() !== this.sessionMode) { await this.load(); return; }
     // Original requests may still be queried/replayed after access/model shutdown;
     // the server decides whether this is a replay or a new billable attempt.
     if (!this.data.requestId && !this.data.bootstrap?.enabled) return toast(new Error(this.data.bootstrap?.contentReview?.eligible === false
       ? '当前账号尚未获得访问权限，请到“我的”复制接入标识' : '云端模型尚未启用，请联系维护者完成配置'));
-    if (this.data.pendingText && this.data.text.trim() !== this.data.pendingText) return toast(new Error('请先查询上一条消息状态，避免重复提交'));
-    const text = this.data.text.trim(), mode = getMode(), requestId = this.data.requestId || uniqueId();
-    this.setData({ busy: true, error: '', pendingText: text, requestId });
+    const mode = getMode(), requestId = this.data.requestId || uniqueId();
+    // Render the outgoing bubble and release the composer before any network
+    // await. The pending bubble is not a server-delivery acknowledgement.
+    this.setData({ busy: true, error: '', pendingText: text, requestId, text: retry ? this.data.text : '', lastJob: null, bottom: 'msg-end' });
     try {
       const r = await call<{ job: ChatJob }>('companion.send', { conversationId: this.data.id, text }, requestId);
       if (!this.alive || mode !== getMode()) return;
       this.setData({ lastJob: r.job });
-      if (r.job.status === 'SUCCEEDED') { this.initiativeSuppressed = false; this.setData({ text: '', pendingText: '', requestId: '' }); }
+      if (r.job.status === 'SUCCEEDED') { this.initiativeSuppressed = false; this.setData({ pendingText: '', requestId: '' }); }
       else if (r.job.status !== 'PROCESSING') this.setData({ error: '该次请求已结束且未生成回复，可保留草稿后重新发送。' });
       await this.load();
     } catch(e) { if (this.alive && mode === getMode()) { this.setData({ error: e instanceof Error ? e.message : '发送失败' }); await this.load(); } }
@@ -116,12 +120,14 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
   async query() {
     if (this.data.busy) return;
     // Retrying with the original request id is idempotent even after a lost response.
-    if (this.data.requestId) return this.send();
+    if (this.data.requestId) return this.send(true);
     this.setData({ error: '' }); await this.load();
   },
   discard() {
     if (this.data.busy || this.data.lastJob?.status === 'PROCESSING') return toast(new Error('请求仍在处理中，请先查询状态'));
-    this.setData({ requestId: '', pendingText: '', error: '' });
+    if (this.data.text.trim() && this.data.text.trim() !== this.data.pendingText)
+      return toast(new Error('输入框已有新草稿，请先保留它，再恢复上一条消息'));
+    this.setData({ text: this.data.pendingText || this.data.text, requestId: '', pendingText: '', error: '' });
   },
   settings() { this.stopInitiative(); wx.navigateTo({ url: `/pages/chat-settings/index?id=${encodeURIComponent(this.data.id)}` }); },
   realChat() { if (!this.data.busy && !this.data.pendingText) requestModeSwitch('cloud'); },

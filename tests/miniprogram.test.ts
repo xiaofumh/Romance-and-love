@@ -60,6 +60,33 @@ function mini(cloudData?: (request: any) => unknown, file?: { size: number; text
   return { api, page, clipboards, toasts, storage, cloudRequests, events, navigations, modals, fileReads: () => fileReads };
 }
 describe('native mini-program page workflows (wx mocked)', () => {
+  it('shows the outgoing bubble and clears the composer before the model finishes, preserving the next draft', async () => {
+    let finish!: (v: unknown) => void;
+    const m = mini(r => r.data.action === 'session.bootstrap' ? cloudBoot : r.data.action === 'companion.send'
+      ? new Promise(resolve => { finish = resolve; }) : cloudDetail);
+    m.api.setMode('cloud'); const p = m.page('chat'); p.onLoad({ id: 'cloud-conversation' }); await p.onShow();
+    p.input({ detail: { value: '先发这条' } }); const flight = p.send();
+    expect(p.data.pendingText).toBe('先发这条'); expect(p.data.text).toBe(''); expect(p.data.bottom).toBe('msg-end');
+    p.input({ detail: { value: '下一条草稿' } }); await p.send();
+    expect(m.cloudRequests.filter(r => r.data.action === 'companion.send')).toHaveLength(1);
+    finish({ job: { status: 'SUCCEEDED' } }); await flight;
+    expect(p.data.pendingText).toBe(''); expect(p.data.text).toBe('下一条草稿'); p.onUnload();
+  });
+  it('keeps an uncertain outgoing bubble and reuses its request without substituting the new draft', async () => {
+    let rejectSend!: (e: Error) => void, count = 0;
+    const m = mini(r => r.data.action === 'session.bootstrap' ? cloudBoot : r.data.action === 'companion.send'
+      ? ++count === 1 ? new Promise((_resolve, reject) => { rejectSend = reject; }) : { job: { status: 'SUCCEEDED' } } : cloudDetail);
+    m.api.setMode('cloud'); const p = m.page('chat'); p.onLoad({ id: 'cloud-conversation' }); await p.onShow();
+    p.input({ detail: { value: '原始消息' } }); const flight = p.send();
+    p.input({ detail: { value: '新草稿' } }); rejectSend(new Error('网络中断')); await flight;
+    expect(p.data.pendingText).toBe('原始消息'); expect(p.data.text).toBe('新草稿');
+    p.discard(); expect(p.data.pendingText).toBe('原始消息'); expect(p.data.text).toBe('新草稿');
+    await p.query();
+    const calls = m.cloudRequests.filter(r => r.data.action === 'companion.send');
+    expect(calls.map(r => r.data.payload.text)).toEqual(['原始消息', '原始消息']);
+    expect(calls[0].data.clientRequestId).toBe(calls[1].data.clientRequestId);
+    expect(p.data.text).toBe('新草稿'); expect(p.data.pendingText).toBe(''); p.onUnload();
+  });
   it('loads the server Beijing timestamp without deriving the current date from the device clock', async () => {
     const response = { ...cloudDetail, clock: { dateTime: '2026-10-29 01:00:00' } };
     const m = mini(r => r.data.action === 'session.bootstrap' ? cloudBoot : response); m.api.setMode('cloud');
@@ -355,7 +382,7 @@ describe('cloud-first routing and safe local-space upgrade', () => {
       return request.data.action === 'session.bootstrap' ? cloudBoot : cloudDetail; });
     m.api.setMode('cloud'); const p = m.page('chat'); p.onLoad({ id: 'cloud-conversation', mode: 'cloud' }); await p.onShow();
     p.input({ detail: { value: '你是什么人' } }); await p.send();
-    expect(p.data.messages).toHaveLength(0); expect(p.data.text).toBe('你是什么人'); expect(p.data.requestId).not.toBe('');
+    expect(p.data.messages).toHaveLength(0); expect(p.data.text).toBe(''); expect(p.data.pendingText).toBe('你是什么人'); expect(p.data.requestId).not.toBe('');
     expect(m.cloudRequests.filter(r => r.data.action === 'companion.send')).toHaveLength(1);
     expect(m.api.getMode()).toBe('cloud'); expect(m.storage.has(localKey)).toBe(false);
   });

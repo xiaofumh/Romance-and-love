@@ -1,8 +1,8 @@
 {
   "name": "ai-communication-assistant",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
-  "description": "一个人格对应一个固定聊天框",
+  "description": "聊天消息即时显示，独立等待AI回复",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
