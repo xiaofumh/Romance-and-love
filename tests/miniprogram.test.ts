@@ -60,6 +60,30 @@ function mini(cloudData?: (request: any) => unknown, file?: { size: number; text
   return { api, page, clipboards, toasts, storage, cloudRequests, events, navigations, modals, actionSheets, fileReads: () => fileReads };
 }
 describe('native mini-program page workflows (wx mocked)', () => {
+  it('loads older history without sending it as model context and coalesces repeated page clicks', async () => {
+    const messages = Array.from({ length: 80 }, (_, i) => ({ id: 'm' + i, requestId: 'q' + i, speaker: i % 2 ? 'assistant' : 'user', text: '聊天原文' + i, createdAt: Date.now() - 100000 + i }));
+    let release!: (value: unknown) => void;
+    const detail = { ...cloudDetail, role: { ...cloudDetail.role, proactiveEnabled: false }, conversation: { ...cloudDetail.conversation, messages, history: { epoch: 1, nextSequence: 80 } } };
+    const m = mini(r => r.data.action === 'session.bootstrap' ? cloudBoot : r.data.action === 'companion.history.page' ? new Promise(resolve => { release = resolve; }) : detail);
+    m.api.setMode('cloud'); const p = m.page('chat'); p.onLoad({ id: 'c' }); await p.onShow();
+    expect(p.data.messages).toHaveLength(40); expect(p.data.messages[0].id).toBe('m40');
+    const first = p.loadOlder(), second = p.loadOlder(); expect(m.cloudRequests.filter(r => r.data.action === 'companion.history.page')).toHaveLength(1);
+    release({ messages: messages.slice(0, 40), epoch: 1, hasMore: false }); await Promise.all([first, second]);
+    expect(p.data.messages).toHaveLength(80); expect(new Set(p.data.messages.map((x: any) => x.id)).size).toBe(80);
+    const request = m.cloudRequests.find(r => r.data.action === 'companion.history.page');
+    expect(request.data.payload).toEqual({ conversationId: 'c', cursor: { epoch: 1, beforeId: 'm40' } });
+    expect(m.cloudRequests.some(r => r.data.action === 'companion.send')).toBe(false); p.onUnload();
+  });
+  it('does not restore a stale older page after a privacy reset', async () => {
+    const messages = Array.from({ length: 45 }, (_, i) => ({ id: 'm' + i, requestId: 'q' + i, speaker: 'user', text: '旧原文' + i, createdAt: Date.now() }));
+    let release!: (value: unknown) => void;
+    const detail = { ...cloudDetail, role: { ...cloudDetail.role, proactiveEnabled: false }, conversation: { ...cloudDetail.conversation, messages, history: { epoch: 1, nextSequence: 45 } } };
+    const m = mini(r => r.data.action === 'session.bootstrap' ? cloudBoot : r.data.action === 'companion.history.page' ? new Promise(resolve => { release = resolve; }) : detail);
+    m.api.setMode('cloud'); const p = m.page('chat'); p.onLoad({ id: 'c' }); await p.onShow(); const pending = p.loadOlder();
+    await m.api.call('companion.delete', { kind: 'conversation', id: 'c' });
+    release({ messages: messages.slice(0, 5), epoch: 1, hasMore: false }); await pending;
+    expect(p.data.messages.some((x: any) => x.id === 'm0')).toBe(false); p.onUnload();
+  });
   it('offers a sourced candidate from a user bubble without putting private text into navigation URLs or accepting AI output as evidence', () => {
     const m = mini(), p = m.page('chat');
     p.setData({ id: 'chat-id', role: { id: 'role-id' }, messages: [{ id: 'user-id', speaker: 'user', text: '私密测试原文' }, { id: 'assistant-id', speaker: 'assistant', text: 'AI回答' }] });

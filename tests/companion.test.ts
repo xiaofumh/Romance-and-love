@@ -187,10 +187,10 @@ describe('chat lifecycle, limits, deletion and cancellation', () => {
     await h.api('A', 'companion.clear', { confirmed: true }); expect((await h.api<Bootstrap>('A', 'session.bootstrap')).chatRemaining).toBe(0);
     const b = await h.role('B'), bc = await h.conversation('B', b.id); expect(await h.send('B', bc.id)).toMatchObject({ ok: false, error: { code: 'BUDGET_EXCEEDED' } });
   });
-  it('retains bounded conversation history and sends twelve user turns by default', async () => {
+  it('retains history beyond40 messages while sending twelve user turns by default', async () => {
     const h = harness(); await h.prepare(); const r = await h.role(), c = await h.conversation('A', r.id);
     for (let i = 0; i < 23; i++) { h.advance(60001); unwrap(await h.send('A', c.id, `第${i}轮`)); }
-    expect((await h.api('A', 'companion.conversation.get', { id: c.id })).conversation.messages).toHaveLength(40);
+    expect((await h.api('A', 'companion.conversation.get', { id: c.id })).conversation.messages).toHaveLength(46);
     expect(h.contexts.at(-1)!.messages).toHaveLength(24);
   });
   it('expires documents, associated memories and conversation content after30days', async () => {

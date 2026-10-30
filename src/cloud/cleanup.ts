@@ -1,4 +1,5 @@
 import { cloudRepository } from './repository';
+import { cleanupHistory } from './history-cleanup';
 const cloud = require('wx-server-sdk');
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const db = cloud.database();
@@ -14,5 +15,6 @@ export async function main(event: unknown) {
   for (const record of rows.data) {
     await repo.transact(record._id, stamp, () => ({ cleaned: true })); processed++;
   }
-  return { ok: true, processed, at: stamp };
+  const history = await cleanupHistory(db, stamp);
+  return { ok: true, processed, history, at: stamp };
 }

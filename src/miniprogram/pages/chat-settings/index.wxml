@@ -3,7 +3,7 @@
     <view class="section-title">当前会话：{{contextRounds}}轮上下文</view>
     <view class="chips"><view class="chip {{contextRounds === 6 ? 'selected' : ''}}" data-rounds="6" bindtap="context">6轮 · 精简</view><view class="chip {{contextRounds === 12 ? 'selected' : ''}}" data-rounds="12" bindtap="context">12轮 · 默认</view></view>
     <view class="hint">{{contextRounds === 12 ? '按最近12条用户消息分组，携带对应回复和主动接话，最多36条语义消息。' : '原版最多12条近期消息，主动消息也占条数。'}} 每条历史仍最多600字符，再加本次输入；气泡分段不增加轮数。</view>
-    <view class="hint">当前保存{{count}}条正文，最多40条、最长30天。纠错、删除、过期或停用记忆会缩短可用上下文，不会补读被排除的历史。另附最多10条有效确认记忆和3组相关参考。</view>
+    <view class="hint">当前工作区含{{count}}条近期正文，完整聊天按30天保存，可在聊天页向前翻页，不按40条截断。纠错、删除、过期或停用记忆会缩短可用上下文，不会补读被排除的历史。另附最多10条有效确认记忆和3组相关参考。</view>
     <view class="hint">每次请求由服务端提供北京时间，聊天页不显示同步时间条；时间不证明用户地点或活动。新会话默认12轮，已明确选过6轮的会话保留原选择。</view>
     <view class="demo-note" wx:if="{{contextResetReason}}">{{contextResetReason}}</view>
   </view>

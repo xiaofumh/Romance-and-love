@@ -17,6 +17,8 @@ import { primaryConversation } from './primary-conversation';
 import { AUTONOMOUS_DAILY_LIMIT } from './autonomy';
 import { MEMORY_POLICY, appendMemorySource, explicitMemoryCandidate, memoryKey, memoryUsesDocument, selectMemories } from './companion-memory';
 import type { MemorySource } from '../shared/companion';
+import { HISTORY_POLICY, inlineHistoryPage } from '../shared/history';
+import type { HistoryMessage } from '../shared/history';
 
 const Id = z.string().min(1).max(100), ById = z.object({ id: Id }).strict();
 function take<T extends { id: string }>(items: T[], id: string): T { return items.find(v => v.id === id) ?? fail('RESOURCE_UNAVAILABLE', '记录不存在或无权访问'); }
@@ -56,15 +58,22 @@ export function createCompanion(o: ServiceOptions) {
   const now = o.now ?? Date.now, timeout = o.timeoutMs ?? 28000;
   const tx = <T>(uid: string, fn: (s: UserState, c: CompanionState) => T) => o.repository.transact(uid, now(), s => {
     const c = companionState(s), result = fn(s, c);
-    if (utf8Bytes(JSON.stringify(c)) > STORAGE_LIMITS.companionBytes) fail('STORAGE_LIMIT', '资料或聊天总空间已满（4MB），请先导出并清理旧内容');
+    if (utf8Bytes(JSON.stringify({ ...c, conversations: c.conversations.map(v => ({ ...v, messages: [] })) })) > STORAGE_LIMITS.companionBytes) fail('STORAGE_LIMIT', '角色、记忆和参考资料空间已满（4MB），请先导出并清理旧资料');
     return result;
   });
   const result = (c: CompanionState, id: string) => {
     const job = take(c.jobs, id), conversation = take(c.conversations, job.conversationId);
     const message = conversation.messages.find(m => m.requestId === id && m.speaker === 'assistant');
-    if (job.status === 'SUCCEEDED' && !message) fail('DATA_EXPIRED', '该轮聊天已过期或清除，不会再次调用模型');
+    if (job.status === 'SUCCEEDED' && !message) fail('DATA_EXPIRED', '该轮回复不在近期工作记录，请从30天聊天历史查看；不会再次调用模型');
     return { job, ...(message ? { message } : {}), mode: o.mode };
   };
+  async function historyMessage(uid: string, conversationId: string, messageId: string): Promise<HistoryMessage> {
+    if (o.repository.historyMessage) return o.repository.historyMessage(uid, now(), conversationId, messageId);
+    return tx(uid, (_s, c) => { const v = take(c.conversations, conversationId);
+      const message = v.messages.find(m => m.id === messageId && m.createdAt > now() - HISTORY_POLICY.retentionMs);
+      return { roleId: v.roleId, epoch: v.history?.epoch ?? 0, ...(message ? { message } : {}) };
+    });
+  }
   async function send(uid: string, event: Envelope): Promise<unknown> {
     const isInitiative = event.action === 'companion.initiative';
     const p = isInitiative ? { ...z.object({ conversationId: Id }).strict().parse(event.payload), text: '' }
@@ -202,7 +211,9 @@ export function createCompanion(o: ServiceOptions) {
           { id: o.id(), requestId: id, speaker: 'assistant', text, createdAt: now(), mode: o.mode, memoryUsed: run.context.memories.length > 0,
             kind: isInitiative ? 'initiative' : 'reply', ...(run.context.role.bubbleStyle === 'natural' ? { parts: naturalBubbles(text, 'natural') } : {}),
             sources: run.context.examples.map(e => ({ documentId: e.documentId, title: e.title, turn: e.turn })) });
-        conversation.messages = conversation.messages.slice(-CONTEXT_LIMITS.storedMessages); conversation.updatedAt = now(); job.status = 'SUCCEEDED'; timing(job);
+        // 保存按30天到期，不按条数截断。云适配器另外维护有限工作缓存，
+        // 淘汰缓存不会删除独立归档；模型仍由selectContext控制12轮窗口。
+        conversation.updatedAt = now(); job.status = 'SUCCEEDED'; timing(job);
         return result(c, id);
       });
     } catch (error) {
@@ -228,6 +239,32 @@ export function createCompanion(o: ServiceOptions) {
   }
   return async (uid: string, event: Envelope): Promise<unknown> => {
     if (event.action === 'companion.send' || event.action === 'companion.initiative') return send(uid, event);
+    if (event.action === 'companion.history.page') {
+      const q = z.object({ conversationId: Id, cursor: z.object({ epoch: z.number().int().min(0), beforeId: Id }).strict().optional() }).strict().parse(event.payload);
+      await tx(uid, (_s, c) => { take(c.conversations, q.conversationId); });
+      return o.repository.historyPage ? o.repository.historyPage(uid, now(), q.conversationId, q.cursor)
+        : tx(uid, (_s, c) => inlineHistoryPage(take(c.conversations, q.conversationId), now(), q.cursor));
+    }
+    if (event.action === 'companion.history.message') {
+      const q = z.object({ conversationId: Id, messageId: Id }).strict().parse(event.payload);
+      return historyMessage(uid, q.conversationId, q.messageId);
+    }
+    if (event.action === 'companion.memory.source') {
+      const q = z.object({ id: Id, sourceIndex: z.number().int().min(0).max(3).optional() }).strict().parse(event.payload);
+      const snapshot = await tx(uid, (_s, c) => { const m = take(c.memories, q.id); return { version: m.version, roleId: m.roleId, source: m.sources?.[q.sourceIndex ?? (m.sources.length - 1)] }; });
+      const source = snapshot.source;
+      if (!source || source.kind === 'manual') return { available: false, reason: 'manual' };
+      const archived = source.kind === 'message' ? await historyMessage(uid, source.conversationId!, source.messageId!) : undefined;
+      return tx(uid, (_s, c) => { const m = take(c.memories, q.id);
+        if (m.version !== snapshot.version) fail('DATA_CHANGED', '记忆已更新，请重新查看来源');
+        const text = source.kind === 'message' ? archived?.roleId === m.roleId ? archived.message?.text : undefined
+          : c.documents.find(d => d.id === source.documentId && d.roleId === m.roleId)?.turns[(source.turn ?? 0) - 1]?.text;
+        if (archived && (c.conversations.find(v => v.id === source.conversationId)?.history?.epoch ?? 0) !== archived.epoch) fail('DATA_CHANGED', '来源已清理，请刷新');
+        return { available: text != null, source, ...(text == null ? { reason: 'expired-or-deleted' } : { text: text.slice(0, 2000), truncated: text.length > 2000 }) };
+      });
+    }
+    const sourceInput = event.action === 'companion.memory.save' ? MemoryInput.parse(event.payload).source : undefined;
+    const sourceMessage = sourceInput?.kind === 'message' ? await historyMessage(uid, sourceInput.conversationId, sourceInput.messageId) : undefined;
     return tx(uid, (s, c) => {
       if (s.status !== 'ACTIVE') fail('ACCOUNT_DELETED', '账号数据已删除');
       const p = event.payload ?? {};
@@ -256,23 +293,7 @@ export function createCompanion(o: ServiceOptions) {
           lastMemorySelection: [...c.jobs].reverse().find(j => j.roleId === id && j.metrics?.memorySelection)?.metrics?.memorySelection };
       }
       if (event.action === 'companion.document.get') { const { id } = ById.parse(p); return take(c.documents, id); }
-      if (event.action === 'companion.memory.source') {
-        const q = z.object({ id: Id, sourceIndex: z.number().int().min(0).max(3).optional() }).strict().parse(p);
-        const m = take(c.memories, q.id), source = m.sources?.[q.sourceIndex ?? (m.sources.length - 1)];
-        if (!source || source.kind === 'manual') return { available: false, reason: 'manual' };
-        let text: string | undefined;
-        if (source.kind === 'message') {
-          const conversation = c.conversations.find(v => v.id === source.conversationId && v.roleId === m.roleId);
-          text = conversation?.messages.find(v => v.id === source.messageId && v.speaker === 'user')?.text;
-        } else {
-          const document = c.documents.find(d => d.id === source.documentId && d.roleId === m.roleId);
-          text = document?.turns[(source.turn ?? 0) - 1]?.text;
-        }
-        // 来源指针不是永久原文副本。消息到期后如实说明不可用，不能
-        // 用记忆摘要冒充原话；只返回有限预览，避免下载整份大文档。
-        return { available: text != null, source, ...(text == null ? { reason: 'expired-or-deleted' } : { text: text.slice(0, 2000), truncated: text.length > 2000 }) };
-      }
-      if (event.action === 'companion.export') { z.object({ confirmed: z.literal(true) }).strict().parse(p); return { exportedAt: now(), roles: c.roles, conversations: c.conversations, documents: c.documents, memories: c.memories }; }
+      if (event.action === 'companion.export') { z.object({ confirmed: z.literal(true) }).strict().parse(p); return { exportedAt: now(), historyPaged: true, roles: c.roles, conversations: c.conversations, documents: c.documents, memories: c.memories }; }
       // Destructive operations remain available after revocation; creation requires current consent.
       if (event.action === 'companion.clear') {
         z.object({ confirmed: z.literal(true) }).strict().parse(p); cancelPending(s); s.companion = { ...emptyCompanion(), jobs: c.jobs }; return { deleted: true };
@@ -283,7 +304,7 @@ export function createCompanion(o: ServiceOptions) {
         if (q.kind === 'conversation') { take(c.conversations, q.id); c.conversations = c.conversations.filter(v => v.id !== q.id); }
         if (q.kind === 'document') { take(c.documents, q.id); const affected = new Set(c.memories.filter(m => memoryUsesDocument(m, q.id)).map(m => m.roleId)); c.documents = c.documents.filter(v => v.id !== q.id); c.memories = c.memories.filter(v => !memoryUsesDocument(v, q.id));
           // Drop entire referenced rounds, not only citation labels, to avoid resurrecting source text.
-          for (const v of c.conversations) if (affected.has(v.roleId) || v.messages.some(m => m.sources?.some(e => e.documentId === q.id))) {
+          for (const v of c.conversations) if (affected.has(v.roleId) || v.referenceDocumentIds?.includes(q.id) || v.messages.some(m => m.sources?.some(e => e.documentId === q.id))) {
             v.messages = []; if (v.interaction) v.interaction.recentTopics = [];
           }
         }
@@ -373,7 +394,10 @@ export function createCompanion(o: ServiceOptions) {
         if (q.source?.kind === 'message') {
           const conversation = take(c.conversations, q.source.conversationId);
           if (conversation.roleId !== q.roleId) fail('RESOURCE_UNAVAILABLE', '来源不属于此角色');
-          const message = take(conversation.messages, q.source.messageId);
+          if (sourceMessage && sourceMessage.epoch !== (conversation.history?.epoch ?? 0)) fail('DATA_CHANGED', '来源已清理，请刷新');
+          const messageId = q.source.messageId;
+          const message = sourceMessage?.message ?? conversation.messages.find(m => m.id === messageId);
+          if (!message) return fail('RESOURCE_UNAVAILABLE', '来源消息已过期或不可用');
           if (message.speaker !== 'user' || !message.text.includes(redactPrivate(q.text))) fail('INVALID_INPUT', '消息来源须为包含这段原文的用户消息；改写内容请手动添加');
           source = { ...q.source, speaker: 'user', occurredAt: message.createdAt, recordedAt: now() };
         } else if (q.source?.kind === 'document') {

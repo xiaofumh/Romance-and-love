@@ -135,7 +135,7 @@ describe('V0.3 selected persona/history/memory features (no network)', () => {
     const h = harness(), { chat } = await h.prepare();
     for (let i = 0; i < 8; i++) { h.advance(60001); await h.send(chat.id, `ROUND_${i}_` + '长'.repeat(800)); }
     const ctx = h.contexts.at(-1)!; expect(ctx.messages).toHaveLength(14); expect(ctx.messages[0]!.text).toMatch(/^ROUND_0_/);
-    expect(ctx.messages.every(m => m.text.length <= 600)).toBe(true); expect(CONTEXT_LIMITS.storedMessages).toBe(40);
+    expect(ctx.messages.every(m => m.text.length <= 600)).toBe(true); expect(CONTEXT_LIMITS).not.toHaveProperty('storedMessages');
   });
   it('reports duplicate reference content without deleting or changing speaker roles', () => {
     const turns = [{ speaker: 'user' as const, text: '你好' }, { speaker: 'reference' as const, text: '你好' }, { speaker: 'reference' as const, text: ' 你好 ' }];

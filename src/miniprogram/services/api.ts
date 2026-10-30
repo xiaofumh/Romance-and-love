@@ -36,6 +36,7 @@ function readLocalState(): UserState | undefined {
 }
 function writeLocalState(state: UserState): void {
   const previous = chunkIndex(wx.getStorageSync(STORAGE_KEY)), text = JSON.stringify(state), keys: string[] = [];
+  if (text.length > 64 * 128 * 1024) throw new Error('本机演示存储空间不足，旧数据保留，请先导出；云端聊天使用独立归档');
   try {
     // Commit the small index last; on a storage failure retain the prior snapshot.
     const generation = uniqueId();

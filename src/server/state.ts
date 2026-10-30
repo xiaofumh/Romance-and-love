@@ -1,6 +1,7 @@
 import type { GenerateInput, GenerationStatus, History, Memory, Profile, Reply, Settings } from '../shared/contracts';
 import type { CompanionState } from '../shared/companion';
 import type { ScreenshotJob } from '../shared/screenshot';
+import type { HistoryCursor, HistoryPage, HistoryMessage } from '../shared/history';
 
 export type Generation = { id: string; payloadHash: string; status: GenerationStatus; createdAt: number;
   expiresAt: number; leaseUntil: number; dateKey: string; revision: number; input?: GenerateInput;
@@ -52,7 +53,7 @@ export function maintain(s: UserState, now: number): void {
     const expiredMemories = c.memories.filter(m => m.expiresAt != null && m.expiresAt <= now && !m.expiryHandled);
     for (const m of expiredMemories) { m.expiryHandled = true; resetRoleContext(c, m.roleId, '短期记忆已过期，旧消息保留但不再作为上下文'); }
     for (const v of c.conversations) {
-      if (affected.has(v.roleId) || v.messages.some(m => m.sources?.some(e => expired.has(e.documentId)))) {
+      if (affected.has(v.roleId) || v.referenceDocumentIds?.some(id => expired.has(id)) || v.messages.some(m => m.sources?.some(e => expired.has(e.documentId)))) {
         v.messages = []; if (v.interaction) v.interaction.recentTopics = [];
       }
       v.messages = v.messages.filter(m => m.createdAt > now - 30 * 86400000);
@@ -90,6 +91,8 @@ export function cancelPending(s: UserState): void {
 }
 export interface StateRepository {
   transact<T>(userId: string, now: number, operation: (state: UserState) => T): Promise<T>;
+  historyPage?(userId: string, now: number, conversationId: string, cursor?: HistoryCursor): Promise<HistoryPage>;
+  historyMessage?(userId: string, now: number, conversationId: string, messageId: string): Promise<HistoryMessage>;
 }
 export class MemoryRepository implements StateRepository {
   private states = new Map<string, UserState>();

@@ -2,6 +2,8 @@ import { call, getMode, resetDemo, requestModeSwitch, toast } from '../../servic
 import { POLICY_VERSION } from '../../../shared/contracts';
 import type { Bootstrap } from '../../../shared/contracts';
 import { config } from '../../config';
+import { streamHistoryExport, type CompanionExport } from '../../services/history-export';
+import type { HistoryPage, HistoryCursor } from '../../../shared/history';
 
 Page({
   data: { bootstrap: null as Bootstrap | null, version: config.version, mode: getMode(), busy: false, exportPath: '' },
@@ -18,7 +20,7 @@ Page({
     };
     if (enabled) {
       wx.showModal({ title: field === 'historyEnabled' ? '开启历史保存？' : '开启已确认记忆？',
-        content: field === 'historyEnabled' ? '陪伴聊天每会话保留40条正文、最长30天。旧版建议历史保留20条。模拟版仅在本地保存，云端模式上传至已配置服务。可随时删除。请先阅读隐私说明。' : '只使用你明确确认的事实，按用户与角色隔离。关闭记忆将清空全部陪伴会话正文，避免旧回复复述记忆；记忆条目本身需单独删除。请先阅读隐私说明。',
+        content: field === 'historyEnabled' ? '云端陪伴聊天按消息时间保存最近30天，不再按40条截断，可分页查看。手动删除会提前清理；本地演示受设备空间限制。旧版建议历史保留20条。模拟版仅在本地保存，云端模式上传至已配置服务。可随时删除。请先阅读隐私说明。' : '只使用你明确确认的事实，按用户与角色隔离。关闭记忆将清空全部陪伴会话正文，避免旧回复复述记忆；记忆条目本身需单独删除。请先阅读隐私说明。',
         confirmText: '同意开启', success: r => { if (r.confirm) void apply(); else void this.refresh(); } });
     } else if (field === 'memoryEnabled') {
       wx.showModal({ title: '关闭记忆并清空旧消息？', content: '清空全部陪伴会话正文，防止旧回复继续携带记忆。记忆条目仍保留，可单独删除。', success: r => { if (r.confirm) void apply(); else void this.refresh(); } });
@@ -35,10 +37,19 @@ Page({
   legacyHistory() { wx.navigateTo({ url: '/pages/history/index' }); },
   clearCompanion() { this.confirm('清空全部陪伴数据？', '清除所有角色、会话正文、资料和记忆，取消在途回复。无正文的请求状态最多保留48小时，防止重复计费。不可在应用中恢复。', async () => { await call('companion.clear', { confirmed: true }); }); },
   exportData() { this.confirm('导出私人数据文件？', '将在本机保存未加密JSON，包含角色、聊天、资料和记忆。请自行保管并及时删除，切勿随意转发。', async () => {
-    const data = await call('companion.export', { confirmed: true });
+    const mode = getMode(), data = await call<CompanionExport>('companion.export', { confirmed: true });
+    if (getMode() !== mode) throw new Error('运行模式已切换，导出停止');
     const filePath = `${wx.env.USER_DATA_PATH}/companion-export-${Date.now()}.json`;
-    await new Promise<void>((resolve, reject) => wx.getFileSystemManager().writeFile({ filePath, data: JSON.stringify(data, null, 2), encoding: 'utf8', success: () => resolve(), fail: () => reject(new Error('导出写入失败')) }));
-    this.setData({ exportPath: filePath });
+    const fs = wx.getFileSystemManager();
+    this.setData({ exportPath: '' });
+    try {
+      await new Promise<void>((resolve, reject) => fs.writeFile({ filePath, data: '', encoding: 'utf8', success: () => resolve(), fail: () => reject(new Error('导出创建失败')) }));
+      await streamHistoryExport(data, async (id: string, cursor?: HistoryCursor) => {
+        if (getMode() !== mode) throw new Error('运行模式已切换，导出停止');
+        return call<HistoryPage>('companion.history.page', { conversationId: id, ...(cursor ? { cursor } : {}) });
+      }, chunk => new Promise<void>((resolve, reject) => fs.appendFile({ filePath, data: chunk, encoding: 'utf8', success: () => resolve(), fail: () => reject(new Error('导出空间不足或写入失败')) })));
+      this.setData({ exportPath: filePath });
+    } catch(e) { fs.unlink({ filePath, fail: () => {} }); throw e; }
   }); },
   shareExport() { if (this.data.exportPath) wx.shareFileMessage({ filePath: this.data.exportPath, fileName: 'AI陪伴-私人数据.json' }); },
   modePicker() {

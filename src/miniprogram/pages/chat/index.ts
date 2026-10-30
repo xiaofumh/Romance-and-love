@@ -1,16 +1,23 @@
-import { call, ClientError, toast, getMode, uniqueId, requestModeSwitch } from '../../services/api';
+import { call, ClientError, toast, getMode, uniqueId, requestModeSwitch, getListSignal } from '../../services/api';
 import { POLICY_VERSION } from '../../../shared/contracts';
 import type { Bootstrap } from '../../../shared/contracts';
 import type { Conversation, CompanionRole, ChatJob, ChatMessage } from '../../../shared/companion';
 import { displayChatText, referenceCaption } from '../../../shared/companion';
 import { INITIATIVE_LIMITS, naturalBubbles } from '../../../shared/interaction';
 import { beijingClock, type BeijingClock } from '../../../shared/beijing-time';
+import type { HistoryCursor, HistoryPage } from '../../../shared/history';
+
+function presented(messages: ChatMessage[], role: CompanionRole) {
+  return messages.map(m => ({ ...m, text: displayChatText(m), displayTime: Number.isFinite(m.createdAt) ? beijingClock(m.createdAt).dateTime.slice(0, 16) : '',
+    displayParts: naturalBubbles(displayChatText(m), m.speaker === 'assistant' && role.bubbleStyle === 'natural' ? 'natural' : 'single'), referenceCaption: referenceCaption(m.mode) }));
+}
 type Detail = { conversation: Conversation; role: CompanionRole; jobs: ChatJob[];
   initiative?: { enabled: boolean; available: boolean; availableAt: number; reason: string }; serverTime?: number; clock?: BeijingClock };
 Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatMessage[], text: '', busy: false, error: '',
   loading: false, loadError: '', expandedSources: {} as Record<string, boolean>, contextResetReason: '', beijingTime: '',
   bootstrap: null as Bootstrap | null, agreed: false, saveAgreed: false, pendingText: '', requestId: '', lastJob: null as ChatJob | null,
-  bottom: '', mode: getMode(), contextRounds: 12, initiativeReason: '', initiativeBusy: false, initiativeNote: '', initiativeWaitMs: -1 },
+  bottom: '', mode: getMode(), contextRounds: 12, initiativeReason: '', initiativeBusy: false, initiativeNote: '', initiativeWaitMs: -1, historyHasMore: false, olderBusy: false },
+  historyCursor: null as HistoryCursor | null, historyEpoch: 0, historyHasMore: false, olderBusy: false, viewingOlder: false,
   alive: true, visible: false, lastActivityAt: 0, initiativeSuppressed: false, initiativeTimer: null as ReturnType<typeof setTimeout> | null,
   initiativeServerDueAt: 0,
   syncTimer: null as ReturnType<typeof setTimeout> | null, presenceTimer: null as ReturnType<typeof setTimeout> | null,
@@ -72,7 +79,7 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
     try { await task; } finally { if (this.loadTask === task) this.loadTask = null; }
   },
   async fetchData(silent = false): Promise<void> {
-    const mode = getMode(), id = this.data.id;
+    const mode = getMode(), id = this.data.id, privacyReset = getListSignal().reset;
     this.stopInitiative();
     this.setData({ loading: !silent, loadError: '', mode, ...(silent ? {} : { bootstrap: null }) });
     if (mode !== this.sessionMode) {
@@ -87,19 +94,39 @@ Page({ data: { id: '', role: null as CompanionRole | null, messages: [] as ChatM
       if (!this.alive || mode !== getMode() || id !== this.data.id) return;
       const detail = await call<Detail>('companion.conversation.get', { id });
       if (!this.alive || mode !== getMode() || id !== this.data.id) return;
+      if (privacyReset !== getListSignal().reset) { this.setData({ messages: [] }); return; }
       this.initiativeServerDueAt = Date.now() + (detail.initiative?.availableAt ? Math.max(0, detail.initiative.availableAt - (detail.serverTime ?? Date.now())) : 0);
-      this.setData({ role: detail.role, messages: detail.conversation.messages.map(m => ({ ...m, text: displayChatText(m),
-        displayTime: Number.isFinite(m.createdAt) ? beijingClock(m.createdAt).dateTime.slice(0, 16) : '',
-        displayParts: naturalBubbles(displayChatText(m), m.speaker === 'assistant' && detail.role.bubbleStyle === 'natural' ? 'natural' : 'single'), referenceCaption: referenceCaption(m.mode) })), bootstrap, mode,
+      const epoch = detail.conversation.history?.epoch ?? 0, recent = detail.conversation.messages.slice(-40);
+      const keepOlder = silent && this.viewingOlder && this.historyEpoch === epoch && recent.some(m => this.data.messages.some(v => v.id === m.id));
+      const visible = keepOlder ? [...new Map([...this.data.messages.filter(m => m.createdAt > (detail.serverTime ?? Date.now()) - 30 * 86400000), ...recent].map(m => [m.id, m])).values()] : recent;
+      if (!keepOlder) {
+        this.viewingOlder = false; this.historyEpoch = epoch;
+        this.historyCursor = recent[0] ? { epoch, beforeId: recent[0].id } : null;
+        this.historyHasMore = detail.conversation.messages.length >= 40 || (detail.conversation.history?.nextSequence ?? 0) > recent.length;
+      }
+      this.setData({ role: detail.role, messages: presented(visible, detail.role), historyHasMore: this.historyHasMore, bootstrap, mode,
         contextRounds: detail.conversation.contextRounds ?? 12,
         beijingTime: detail.clock?.dateTime ?? '', initiativeReason: detail.initiative?.reason ?? '',
         initiativeWaitMs: detail.initiative?.availableAt ? Math.max(0, detail.initiative.availableAt - (detail.serverTime ?? Date.now())) : -1,
         contextResetReason: detail.conversation.contextResetReason ?? '', lastJob: detail.jobs.at(-1) ?? null,
-        ...(silent && this.data.messages.at(-1)?.id === detail.conversation.messages.at(-1)?.id ? {} : { bottom: `msg-${detail.conversation.messages.at(-1)?.id ?? 'end'}` }) });
+        ...(keepOlder || silent && this.data.messages.at(-1)?.id === detail.conversation.messages.at(-1)?.id ? {} : { bottom: `msg-${detail.conversation.messages.at(-1)?.id ?? 'end'}` }) });
       wx.setNavigationBarTitle({ title: `${detail.role.name} · AI` });
     } catch(e) { if (this.alive && mode === getMode() && id === this.data.id)
       this.setData({ loadError: e instanceof Error ? e.message : '加载失败' }); }
     finally { if (this.alive && mode === getMode() && id === this.data.id) { this.setData({ loading: false }); this.armInitiative(); } }
+  },
+  async loadOlder() {
+    if (this.olderBusy || !this.historyHasMore || !this.historyCursor || this.data.loading || !this.data.role) return;
+    const mode = getMode(), id = this.data.id, epoch = this.historyEpoch, cursor = this.historyCursor, firstId = this.data.messages[0]?.id, privacyReset = getListSignal().reset;
+    this.olderBusy = true; this.setData({ olderBusy: true });
+    try { const page = await call<HistoryPage>('companion.history.page', { conversationId: id, cursor });
+      if (!this.alive || mode !== getMode() || id !== this.data.id || epoch !== this.historyEpoch || privacyReset !== getListSignal().reset) return;
+      this.viewingOlder = true; this.historyEpoch = page.epoch; this.historyCursor = page.cursor ?? null; this.historyHasMore = page.hasMore;
+      const messages = [...new Map([...page.messages, ...this.data.messages].map(m => [m.id, m])).values()];
+      // 分页只更新展示，不把翻页记录上传为模型上下文；保留原顶部锚点。
+      this.setData({ messages: presented(messages, this.data.role!), historyHasMore: page.hasMore, ...(firstId ? { bottom: `msg-${firstId}` } : {}) });
+    } catch(e) { if (mode === getMode()) toast(e); }
+    finally { this.olderBusy = false; this.setData({ olderBusy: false }); }
   },
   input(e: WechatMiniprogram.Input) { const wasTyping = Boolean(this.data.text.trim()); this.lastActivityAt = Date.now(); this.setData({ text: e.detail.value }); this.armInitiative();
     if (wasTyping !== Boolean(this.data.text.trim())) void this.presence(Boolean(this.data.text.trim())); },

@@ -1,8 +1,8 @@
 {
   "name": "ai-communication-assistant",
-  "version": "0.6.0-dev.1",
+  "version": "0.7.0-dev.1",
   "private": true,
-  "description": "可追溯外部记忆、检索检查与主动相处研发版",
+  "description": "聊天正文独立归档，按30天保留与分页查看",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",

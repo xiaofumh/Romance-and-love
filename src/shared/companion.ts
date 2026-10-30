@@ -5,7 +5,7 @@ z.config({ jitless: true });
 export const PERSONALITIES = ['温柔倾听', '理性坦诚', '活泼有趣', '自定义'] as const;
 export const CLOSENESS = ['初识', '熟悉', '亲近'] as const;
 export const EMOTIONS = ['自然回应', '温柔安慰', '轻松俏皮', '冷静认真'] as const;
-export const CONTEXT_LIMITS = { messages: 12, historyCharacters: 600, storedMessages: 40, memories: 10, examples: 3 } as const;
+export const CONTEXT_LIMITS = { messages: 12, historyCharacters: 600, memories: 10, examples: 3 } as const;
 export const CONTEXT_WINDOWS = [6, 12] as const;
 export const DEFAULT_CONTEXT_ROUNDS = 12 as const;
 export type InteractionMode = 'listening' | 'light' | 'quiet';
@@ -23,9 +23,12 @@ export function rolePreferences(role: Partial<CompanionRole>) {
     emotion: role.emotion ?? '自然回应', habits: role.habits ?? '', proactiveEnabled: role.proactiveEnabled ?? false, bubbleStyle: role.bubbleStyle ?? 'single' };
 }
 export type ChatMessage = { id: string; requestId: string; speaker: 'user' | 'assistant'; text: string; createdAt: number;
+  sequence?: number;
   sources?: { documentId: string; title: string; turn: number }[]; mode?: 'demo' | 'cloud'; memoryUsed?: boolean;
   kind?: 'reply' | 'initiative'; parts?: string[] };
 export type Conversation = { id: string; roleId: string; title: string; messages: ChatMessage[]; createdAt: number; updatedAt: number;
+  history?: { epoch: number; nextSequence: number };
+  referenceDocumentIds?: string[];
   primary?: boolean;
   contextAfterId?: string; contextResetReason?: string; contextRounds?: 6 | 12; settingsVersion?: number;
   interaction?: { mode: InteractionMode; initiativeAttemptFor?: string; lastInitiativeAt?: number; recentTopics?: string[];

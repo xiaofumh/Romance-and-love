@@ -85,7 +85,7 @@ describe('controlled companion initiative and bounded context (no network)', () 
     expect(h.contexts[0]!.clock).toMatchObject({ timeZone: 'Asia/Shanghai', dateTime: '2026-10-24 08:00:00' });
     expect((await h.api('companion.conversation.get', { id: c.id })).clock.dateTime).toBe('2026-10-24 08:00:00');
   });
-  it('passes twelve complete user turns with initiative through the service after the 40-message storage trim', async () => {
+  it('passes twelve complete user turns while retaining the older history beyond40 messages', async () => {
     const h = harness(), { c } = await h.prepare(true);
     await h.api('companion.conversation.configure', { id: c.id, version: 1, contextRounds: 12 });
     for (let i = 0; i < 13; i++) {
@@ -96,7 +96,8 @@ describe('controlled companion initiative and bounded context (no network)', () 
     const selected = h.contexts.at(-1)!.messages;
     expect(selected).toHaveLength(36); expect(selected.filter(m => m.speaker === 'user')).toHaveLength(12);
     expect(selected[0]!.text).toContain('虚构第1轮'); expect(reply.job.metrics.historyMessages).toBe(36);
-    expect((await h.api('companion.conversation.get', { id: c.id })).conversation.messages).toHaveLength(40);
+    const stored = (await h.api('companion.conversation.get', { id: c.id })).conversation.messages;
+    expect(stored).toHaveLength(41); expect(stored[0].text).toContain('虚构第0轮');
   });
   it('uses one model call for natural bubbles and stores one semantic assistant message', async () => {
     const h = harness(), { c } = await h.prepare(); const result = await h.send(c.id);

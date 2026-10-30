@@ -3,5 +3,5 @@ export const config = {
   defaultMode: 'cloud' as 'demo' | 'cloud',
   cloudEnvId: 'g030411-d6gbju74084607dd0',
   apiFunction: 'assistantApiV2',
-  version: '0.6.0-dev.1',
+  version: '0.7.0-dev.1',
 };

@@ -1,6 +1,7 @@
 import { call, toast, readableTime, getMode } from '../../services/api';
 import { MEMORY_SUBJECTS, MEMORY_DURATIONS, MEMORY_KINDS, memoryConflict } from '../../../shared/companion';
-import type { CompanionMemory, Conversation, MemorySelection, MemorySelectionEntry } from '../../../shared/companion';
+import type { CompanionMemory, MemorySelection, MemorySelectionEntry } from '../../../shared/companion';
+import type { HistoryMessage } from '../../../shared/history';
 const reasons: Record<MemorySelectionEntry['reason'], string> = { selected: '与话题相关或属于明确边界', background: '少量背景参考', pending: '尚未确认', expired: '已过期', conflict: '存在冲突，请先纠正', duplicate: '内容重复', unrelated: '与话题关联不足', limit: '本轮已有足够参考', disabled: '未开启已确认记忆' };
 type MessageSource = { kind: 'message'; conversationId: string; messageId: string };
 Page({ data: { roleId: '', documentId: '', items: [] as CompanionMemory[], text: '', id: '', version: 0, busy: false,
@@ -14,10 +15,10 @@ Page({ data: { roleId: '', documentId: '', items: [] as CompanionMemory[], text:
     if (getMode() !== this.sessionMode) { this.setData({ items: [], inspection: [], text: '', source: null, error: '运行模式已切换，请返回当前模式的角色资料页。' }); return; }
     if (this.data.source && !this.sourceLoaded) {
       this.sourceLoaded = true;
-      try { const source = this.data.source, d = await call<{ conversation: Conversation }>('companion.conversation.get', { id: source.conversationId });
+      try { const source = this.data.source, d = await call<HistoryMessage>('companion.history.message', { conversationId: source.conversationId, messageId: source.messageId });
         if (getMode() !== this.sessionMode) return;
-        const message = d.conversation.messages.find(m => m.id === source.messageId && m.speaker === 'user');
-        if (!message || d.conversation.roleId !== this.data.roleId) throw new Error('原消息已不可用，请手动添加并核对来源');
+        const message = d.message?.speaker === 'user' ? d.message : undefined;
+        if (!message || d.roleId !== this.data.roleId) throw new Error('原消息已不可用，请手动添加并核对来源');
         this.setData({ text: message.text.slice(0, 100), subjectIndex: 0, sourceHint: message.text.length > 100 ? '已关联用户消息；只预填前100字，请选取原文并核对主体。' : '已关联用户消息，请核对主体；转述别人的话不等于你的事实。' });
       } catch(e) { this.setData({ source: null, error: e instanceof Error ? e.message : '读取来源失败' }); }
     }
