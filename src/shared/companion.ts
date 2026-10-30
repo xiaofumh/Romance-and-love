@@ -25,6 +25,7 @@ export type ChatMessage = { id: string; requestId: string; speaker: 'user' | 'as
   sources?: { documentId: string; title: string; turn: number }[]; mode?: 'demo' | 'cloud'; memoryUsed?: boolean;
   kind?: 'reply' | 'initiative'; parts?: string[] };
 export type Conversation = { id: string; roleId: string; title: string; messages: ChatMessage[]; createdAt: number; updatedAt: number;
+  primary?: boolean;
   contextAfterId?: string; contextResetReason?: string; contextRounds?: 6 | 12; settingsVersion?: number;
   interaction?: { mode: InteractionMode; initiativeAttemptFor?: string; lastInitiativeAt?: number; recentTopics?: string[] } };
 // Presentation-only compatibility: do not rewrite stored historical messages or strip real/user text.

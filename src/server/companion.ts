@@ -13,6 +13,7 @@ import { chatDailyLimit } from './chat-quota';
 import { chooseInitiativeTopic, repeatedInitiative, INITIATIVE_WAIT } from './initiative-topic';
 import { buildDialoguePlan } from './dialogue';
 import { beijingClock } from '../shared/beijing-time';
+import { primaryConversation } from './primary-conversation';
 
 const Id = z.string().min(1).max(100), ById = z.object({ id: Id }).strict();
 function take<T extends { id: string }>(items: T[], id: string): T { return items.find(v => v.id === id) ?? fail('RESOURCE_UNAVAILABLE', '记录不存在或无权访问'); }
@@ -200,7 +201,13 @@ export function createCompanion(o: ServiceOptions) {
     return tx(uid, (s, c) => {
       if (s.status !== 'ACTIVE') fail('ACCOUNT_DELETED', '账号数据已删除');
       const p = event.payload ?? {};
-      if (event.action === 'companion.list') { z.object({}).strict().parse(p); return { roles: c.roles, conversations: c.conversations.map(({ messages, ...v }) => ({ ...v, preview: messages.at(-1)?.text.slice(0, 50) ?? '开始新的聊天' })) }; }
+      if (event.action === 'companion.list') {
+        z.object({}).strict().parse(p);
+        const conversations = c.roles.flatMap(role => {
+          const room = primaryConversation(role, c.conversations); return room ? [room] : [];
+        });
+        return { roles: c.roles, conversations: conversations.map(({ messages, ...v }) => ({ ...v, preview: messages.at(-1)?.text.slice(0, 50) ?? '开始聊天' })) };
+      }
       if (event.action === 'companion.conversation.get') {
         const { id } = ById.parse(p), v = take(c.conversations, id), role = take(c.roles, v.roleId);
         const status = initiativeStatus(v, role, now(), s.settings.memoryEnabled);
@@ -261,7 +268,7 @@ export function createCompanion(o: ServiceOptions) {
         if (c.jobs.some(j => j.conversationId === q.id && j.status === 'PROCESSING')) fail('CHAT_PENDING', '原会话仍在生成，请完成后再建立对比快照');
         if (c.conversations.length >= 12) fail('LIMIT_REACHED', '最多12个会话，请先清理测试会话');
         const fork: Conversation = { ...JSON.parse(JSON.stringify(original)), id: o.id(), title: `上下文${q.contextRounds}轮对比`,
-          contextRounds: q.contextRounds, settingsVersion: 1, createdAt: now(), updatedAt: now() };
+          primary: false, contextRounds: q.contextRounds, settingsVersion: 1, createdAt: now(), updatedAt: now() };
         c.conversations.unshift(fork); return fork;
       }
       if (event.action === 'companion.role.save') {
@@ -278,9 +285,11 @@ export function createCompanion(o: ServiceOptions) {
       }
       if (event.action === 'companion.conversation.create') {
         const q = z.object({ roleId: Id }).strict().parse(p); const role = take(c.roles, q.roleId);
-        if (c.conversations.length >= 12) fail('LIMIT_REACHED', '开发版最多12个会话，请先清理旧会话');
+        const existing = primaryConversation(role, c.conversations);
+        if (existing) return existing;
+        if (c.conversations.length >= 18) fail('LIMIT_REACHED', '历史会话空间已满，请先导出并清理旧会话');
         const v: Conversation = { id: o.id(), roleId: role.id, title: role.name, messages: [], contextRounds: DEFAULT_CONTEXT_ROUNDS, createdAt: now(), updatedAt: now() };
-        c.conversations.unshift(v); return v;
+        v.primary = true; c.conversations.unshift(v); return v;
       }
       if (event.action === 'companion.import') {
         const q = ImportInput.parse(p); take(c.roles, q.roleId);

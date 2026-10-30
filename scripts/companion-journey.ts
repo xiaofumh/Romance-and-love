@@ -116,7 +116,7 @@ export async function runCompanionJourney(provider: Provider, selected: ReturnTy
   const pending = await saveMemory(A, r1.id, '未确认候选PENDING_CANARY_P7', false);
   await saveMemory(A, r2.id, '我喜欢青柠汽水。隔离标记ROLE2_CANARY_Q8'); await saveMemory(B, rb.id, '我喜欢热可可。隔离标记USERB_CANARY_Z9');
   const conversation = (uid: string, roleId: string) => api<Conversation>(uid, 'companion.conversation.create', { roleId });
-  const c1 = await conversation(A, r1.id), c2 = await conversation(A, r1.id), cr2 = await conversation(A, r2.id), cb = await conversation(B, rb.id);
+  const c1 = await conversation(A, r1.id), c2 = await api<Conversation>(A, 'companion.conversation.fork', { id: c1.id, contextRounds: 12 }), cr2 = await conversation(A, r2.id), cb = await conversation(B, rb.id);
   if (prior) {
     // Restore only actual successful earlier model replies into a fresh synthetic fixture session.
     // No provider call or pretend "successful" response is produced for failed earlier rounds.

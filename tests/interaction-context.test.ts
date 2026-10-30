@@ -68,8 +68,8 @@ describe('controlled companion initiative and bounded context (no network)', () 
   });
   it('keeps source notes isolated by conversation and excludes them after role correction', async () => {
     const h = harness(), { c, role } = await h.prepare(true);
-    await h.send(c.id, '今天别聊工作了');
-    const other = await h.api('companion.conversation.create', { roleId: role.id }); await h.send(other.id);
+    const other = await h.api('companion.conversation.fork', { id: c.id, contextRounds: 12 });
+    await h.send(c.id, '今天别聊工作了'); await h.send(other.id);
     expect(h.contexts.at(-1)!.dialoguePlan!.ledger.declinedTopics).toEqual([]);
     await h.send(c.id, '今天我在布置一个小花园');
     expect(h.contexts.at(-1)!.dialoguePlan!.ledger.declinedTopics).toHaveLength(1);
@@ -248,7 +248,7 @@ describe('controlled companion initiative and bounded context (no network)', () 
   it('changing another conversation state does not cancel the current conversation model reply', async () => {
     let release!: (v: { output: unknown }) => void, start!: () => void; const began = new Promise<void>(r => start = r);
     const h = harness(async () => { start(); return new Promise(r => release = r); }), { c, role } = await h.prepare(true);
-    const other = await h.api('companion.conversation.create', { roleId: role.id });
+    const other = await h.api('companion.conversation.fork', { id: c.id, contextRounds: 12 });
     const pending = h.send(c.id, '当前会话自己的虚构问题'); await began;
     await h.api('companion.interaction.configure', { id: other.id, version: 1, mode: 'quiet' });
     release({ output: { text: '当前会话正常完成' } }); expect((await pending).job.status).toBe('SUCCEEDED');

@@ -1,8 +1,8 @@
 {
   "name": "ai-communication-assistant",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
-  "description": "相伴AI聊天V0.5.1：并发保存诊断、隐式纠错与对话边界修复",
+  "description": "一个人格对应一个固定聊天框",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",

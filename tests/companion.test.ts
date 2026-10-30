@@ -30,6 +30,29 @@ function harness(override: Partial<ServiceOptions> = {}) {
   };
 }
 describe('companion scope, context and retrieval', () => {
+  it('reuses one room per role under repeated and simultaneous entry without generating messages', async () => {
+    const h = harness(); await h.prepare(); const r = await h.role();
+    const rooms = await Promise.all(Array.from({ length: 5 }, () => h.conversation('A', r.id)));
+    expect(new Set(rooms.map(c => c.id)).size).toBe(1);
+    expect((await h.api('A', 'companion.list')).conversations).toHaveLength(1);
+    expect((await h.api('A', 'companion.export', { confirmed: true })).conversations).toHaveLength(1);
+    expect(h.contexts).toHaveLength(0);
+  });
+  it('collapses legacy duplicates without deleting or merging old histories and pins the chosen room', async () => {
+    const h = harness(); await h.prepare(); const r = await h.role(), c = await h.conversation('A', r.id);
+    await h.repo.transact('A', Date.parse('2026-10-18T00:00:00Z'), s => {
+      delete s.companion!.conversations[0]!.primary;
+      s.companion!.conversations.push({ ...c, primary: false, id: 'legacy-content', updatedAt: c.updatedAt - 1,
+        messages: [{ id: 'old-m', requestId: 'old-r', speaker: 'user', text: '旧记录合成样本', createdAt: c.createdAt }] });
+    });
+    const listed = await h.api('A', 'companion.list'); expect(listed.conversations.map((v: any) => v.id)).toEqual(['legacy-content']);
+    expect((await h.conversation('A', r.id)).id).toBe('legacy-content');
+    const snapshot = await h.api('A', 'companion.export', { confirmed: true });
+    expect(snapshot.conversations).toHaveLength(2); expect(snapshot.conversations.find((v: any) => v.id === 'legacy-content').messages[0].text).toBe('旧记录合成样本');
+    await h.api('A', 'companion.conversation.fork', { id: 'legacy-content', contextRounds: 6 });
+    expect((await h.conversation('A', r.id)).id).toBe('legacy-content');
+    expect((await h.api('A', 'companion.list')).conversations).toHaveLength(1);
+  });
   it('rejects missing consent and client supplied identity', async () => {
     const h = harness(); expect(await h.raw('A', 'companion.role.save', {})).toMatchObject({ ok: false, error: { code: 'CONSENT_REQUIRED' } });
     expect(await h.handle('A', { action: 'companion.list', userId: 'B' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -59,7 +82,7 @@ describe('companion scope, context and retrieval', () => {
   });
   it('shares confirmed role memory but never another conversation short context', async () => {
     const h = harness(); await h.prepare(); const r = await h.role(); await h.memory('A', r.id, 'ROLE_CONFIRMED');
-    const c1 = await h.conversation('A', r.id), c2 = await h.conversation('A', r.id);
+    const c1 = await h.conversation('A', r.id), c2 = await h.api('A', 'companion.conversation.fork', { id: c1.id, contextRounds: 12 });
     unwrap(await h.send('A', c1.id, 'ONLY_CONVERSATION_ONE')); unwrap(await h.send('A', c2.id, '你好'));
     expect(h.contexts[1]!.messages).toEqual([]); expect(h.contexts[1]!.memories[0]?.text).toBe('ROLE_CONFIRMED');
     unwrap(await h.send('A', c1.id, '接着聊')); expect(h.contexts[2]!.messages[0]?.text).toBe('ONLY_CONVERSATION_ONE');
